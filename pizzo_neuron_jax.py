@@ -1,6 +1,6 @@
-from spyx.axn import superspike
 import jax
 import jax.numpy as jnp
+from spyx.axn import superspike
 
 
 def FeLIF(
@@ -108,10 +108,10 @@ def FeLIF(
 
 
 if __name__ == "__main__":
-    import optax
-    from tqdm import trange
     import matplotlib.pyplot as plt
+    import optax
     from spyx.axn import tanh
+    from tqdm import trange
 
     plt.style.use("dark_background")
 

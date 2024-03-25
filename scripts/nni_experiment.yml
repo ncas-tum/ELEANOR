@@ -1,0 +1,29 @@
+search_space:
+  k:
+    _type: loguniform
+    _value: [ 0.1, 10 ]
+  I_dsc:
+    _type: uniform
+    _value: [ 0.000000000001, 0.000000000100 ]
+  V_thr:
+    _type: uniform
+    _value: [ 1.5, 2.5 ]
+  P_s:
+    _type: uniform
+    _value: [ 0.1, 0.3 ]
+  lr:
+    _type: loguniform
+    _value: [ 0.00001, 0.1 ]
+
+trial_command: python braille.py --nni
+trial_code_directory: .
+trial_concurrency: 1
+max_trial_number: 200
+
+tuner:
+  name: TPE
+  class_args:
+    optimize_mode: maximize
+
+training_service:
+  platform: local
