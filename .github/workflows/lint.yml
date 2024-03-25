@@ -20,12 +20,8 @@ jobs:
           pip install black flake8 flake8-bugbear flake8-black
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
       - name: Analysing the code with black
-        uses: psf/black@stable
-        with:
-          options: "--check --verbose"
-          src: "$(git ls-files '*.py')"
-          jupyter: true
-          version: "~= 24.3"
+        run: |
+          black $(git ls-files '*.py') --check --verbose
       - name: Analysing the code with flak8
         run: |
           flake8 $(git ls-files '*.py') --count --show-source --statistics
