@@ -41,12 +41,11 @@ def FeLIF(
     cap_divider = eps_int / (t_hzo * eps_hzo + t_int * eps_int)
     depol_divider = 1 / _eps0 * t_int / (t_hzo * eps_hzo + t_int * eps_int)
     threshold = V_thr * C_tot + P_s * A
-    print(threshold)
 
     if spike_fn is None:
         spike_fn = superspike()
 
-    def _derivative(V, P):
+    def _derivative(V, P, input_):
         E = V * cap_divider - P * depol_divider
         tau = jax.lax.stop_gradient(
             tau_0 * jnp.exp((E_a / (jnp.abs(E) + soft_E)) ** alpha)
@@ -58,42 +57,66 @@ def FeLIF(
         )
         I_p = (jnp.sign(E) * P_s - P) * A / tau
 
-        I_p = jnp.clip(I_p, -100e6, 100e6)
-        I_leak = jnp.clip(I_leak, -100, 100)
+        # Limit the currents to 100uA
+        I_p = jnp.clip(I_p, -100e-6 * paramsScale, 100e-6 * paramsScale)
+        I_leak = jnp.clip(I_leak, -100e-6 * paramsScale, 100e-6 * paramsScale)
 
-        dv = (1 / C_tot) * (-I_leak - I_p)
+        dv = (1 / C_tot) * (input_ - I_leak - I_p)
         dP = I_p / A
+
         return dv, dP
 
     def _inner_loop(state, input_):
-        [V, P] = state
-        dv, dP = _derivative(V, P)
+        [V, P, spikes] = state
+        dv, dP = _derivative(V, P, input_)
 
-        V_new = jnp.clip(V + dt / innerStep * dv, 0, 5)
-        P_new = jnp.clip(P + dt / innerStep * dP, -0.22, 0.22)
+        V_new = V + (1 - spikes) * dt / innerStep * dv
+        P_new = P + (1 - spikes) * dt / innerStep * dP
 
-        return [V_new, P_new], V_new
+        # Limit voltage and polarization
+        V_new = jnp.clip(V_new, 0, 5)
+        P_new = jnp.clip(P_new, -P_s, P_s)
+
+        charge = V_new * C_tot + P_new * A
+        spikes = spike_fn(charge - threshold)
+
+        return [V_new, P_new, spikes], None
 
     def step(state, input_):
         V, P, charge = state
 
-        last_state, _ = jax.lax.scan(_inner_loop, [V, P], None, innerStep, unroll=20)
-        [V_inner, P_inner] = last_state
-
-        V_inner = jnp.clip(V_inner + input_, 0, 5)
-        P_inner = jnp.clip(P_inner, -P_s, P_s)
-
-        charge_real = V_inner * C_tot + P_inner * A
-        charge_surr = charge + C_tot * input_
-        charge_new = jax.lax.stop_gradient(charge_real) + (
-            charge_surr - jax.lax.stop_gradient(charge_surr)
+        # Inner loop with 10us pulse input current
+        last_state, _ = jax.lax.scan(
+            _inner_loop,
+            [V, P, jnp.zeros_like(charge)],
+            jnp.stack(
+                [input_ * 1e5 * C_tot] * 10  # Convert the input into current
+                + [jnp.zeros_like(input_)] * (innerStep - 10)  # 10 us current
+            ),
+            innerStep,
+            unroll=20,
         )
-        # Charge equal to the real charge in forward pass
-        # but surrogated as IF in backward pass
+        [V_inner, P_inner, _] = last_state
+        dv, dP = _derivative(V, P, jnp.zeros_like(input_))
+        V_upper = V + dt * dv + input_
+        P_upper = P + dt * dP
+
+        # Limit voltage and polarization
+        V_upper = jnp.clip(V_upper, 0, 5)
+        P_upper = jnp.clip(P_upper, -P_s, P_s)
+
+        V_new = (
+            jax.lax.stop_gradient(V_inner) + V_upper - jax.lax.stop_gradient(V_upper)
+        )
+        P_new = (
+            jax.lax.stop_gradient(P_inner) + P_upper - jax.lax.stop_gradient(P_upper)
+        )
+
+        charge_new = V_new * C_tot + P_new * A
 
         spikes = spike_fn(charge_new - threshold)
-        V = (1 - spikes) * jax.lax.stop_gradient(V_inner)
-        P = (1 - spikes) * jax.lax.stop_gradient(P_inner) - spikes * P_s
+        V = (1 - spikes) * V_new
+        P = (1 - spikes) * P_new - (spikes * P_s)
 
         return (V, P, charge_new), (spikes, charge_new, V, P)
 
@@ -110,19 +133,28 @@ def FeLIF(
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
     import optax
-    from spyx.axn import tanh
     from tqdm import trange
 
     plt.style.use("dark_background")
 
-    input_ = jnp.array([[0.2], [0.0]] * 75 + [[0.0], [0.0]] * 75)
-    target = jnp.array([2.0])
-    felif_step, reset = FeLIF(P_s=0.22)
+    # Input every 5ms
+    input_ = jnp.array([1.0, 0, 0, 0, 0] * 20)
+    target = jnp.array([5.0])
+    felif_step, felif_reset = FeLIF(
+        dt=1e-3,
+        innerStep=1000,
+        A=25e-12,
+        I_dsc=3.2532312693054174e-11,
+        V_thr=1.698682296181096,
+        P_s=0.13321217250476625,
+        spike_fn=superspike(),
+        paramsScale=1e12,
+    )
 
     @jax.jit
     def predict(params, input_):
         _, (spikes, charge, V, P) = jax.lax.scan(
-            felif_step, reset(1), input_ * params[0], input_.shape[0], unroll=20
+            felif_step, felif_reset(1), input_ * params[0], input_.shape[0], unroll=20
         )
         return spikes, charge, V, P
 
@@ -132,14 +164,15 @@ if __name__ == "__main__":
         preds = jnp.sum(preds, axis=0)  # Sum over time
         return jnp.mean((preds - target) ** 2)
 
-    params = [jnp.ones((1,))]
-    opt = optax.adamax(learning_rate=0.01, b1=0.9, b2=0.995)
+    params = [jnp.ones((1,)) * 0.3]
+    opt = optax.sgd(learning_rate=1e-2)
     opt_state = opt.init(params)
 
-    nb_epochs = 100
+    nb_epochs = 500
 
     print("Optimizing")
     loss_rec = []
+    param_rec = []
     state = [params, opt_state]
     for _ in trange(nb_epochs):
         grad_params, opt_state = state
@@ -148,11 +181,14 @@ if __name__ == "__main__":
         updates, opt_state = opt.update(grads, opt_state, grad_params)
         loss_rec.append(loss_val)
 
-        state = [optax.apply_updates(grad_params, updates), opt_state]
+        new_param = optax.apply_updates(grad_params, updates)
+        state = [new_param, opt_state]
+        param_rec.append(new_param[0])
     loss_rec = jnp.stack(loss_rec)
+    param_rec = jnp.stack(param_rec)
     print("Predict")
     _, preds_before, _, _ = predict(params, input_)
-    _, preds, _, _ = predict(state[0], input_)
+    _, preds, V, P = predict(state[0], input_)
     print("Finish")
 
     plt.figure()
@@ -161,9 +197,36 @@ if __name__ == "__main__":
     plt.plot(preds_before, label="Before optimizing")
     plt.plot(preds, label="After optimizing")
     plt.legend()
-    plt.subplot(3, 1, 2)
+
+    ax1 = plt.subplot(3, 1, 2)
     plt.title("Loss over epochs")
-    plt.plot(loss_rec)
-    plt.subplot(3, 1, 3)
-    plt.plot(jax.vmap(jax.grad(tanh(k=0.1)), (0,))(preds[:, 0] - 6.932034598021211))
+
+    color = "#8dd3c7"
+    ax1.set_xlabel("Epoch")
+    ax1.set_ylabel("Loss", color=color)
+    ax1.plot(loss_rec, color=color)
+    ax1.tick_params(axis="y", labelcolor=color)
+
+    ax2 = ax1.twinx()
+
+    color = "#feffb3"
+    ax2.set_ylabel("Weight", color=color)
+    ax2.plot(param_rec, color=color)
+    ax2.tick_params(axis="y", labelcolor=color)
+
+    ax1 = plt.subplot(3, 1, 3)
+
+    color = "#8dd3c7"
+    ax1.set_xlabel("time (s)")
+    ax1.set_ylabel("voltage", color=color)
+    ax1.plot(V, color=color)
+    ax1.tick_params(axis="y", labelcolor=color)
+
+    ax2 = ax1.twinx()
+
+    color = "#feffb3"
+    ax2.set_ylabel("Polarization", color=color)
+    ax2.plot(P, color=color)
+    ax2.tick_params(axis="y", labelcolor=color)
+
     plt.show()
