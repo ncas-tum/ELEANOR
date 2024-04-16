@@ -17,6 +17,9 @@ search_space:
   V_thr:
     _type: uniform
     _value: [ 1.5, 2.5 ]
+  reg:
+    _type: uniform
+    _value: [0, 100]
   # P_s:
   #   _type: uniform
   #   _value: [ 0.1, 0.3 ]
@@ -33,7 +36,7 @@ search_space:
   #   _type: choice
   #   _value: ["adamax", "sgd"]
 
-trial_command: python braille2.py --nni
+trial_command: python braille.py --nni --nb_epochs 50
 trial_code_directory: .
 trial_concurrency: 1
 max_trial_number: 500

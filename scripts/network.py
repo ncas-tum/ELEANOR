@@ -27,7 +27,7 @@ def network_builder(
     I_dsc,
     V_thr,
     P_s,
-    spike_fn=tanh(k=10),
+    spike_fn=tanh(k=10),  # noqa: B008
 ):
     @jax.jit
     def encoder_step(state, input_):

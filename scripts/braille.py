@@ -143,41 +143,41 @@ params = [{"gain": enc_gain, "bias": enc_bias}, w1, w2]
 
 @jax.jit
 def loss_fn(output, y, firing_rate=10.0):
-    m = jnp.sum(output, axis=1)  # Sum over time
+    # m = jnp.sum(output, axis=1)  # Sum over time
     # loss_val = jnp.mean((m - y * firing_rate) ** 2)
-    loss_val = optax.softmax_cross_entropy(m, y).mean()
+    # loss_val = optax.softmax_cross_entropy(m, y).mean()
 
-    # fs = (
-    #     output
-    #     * (
-    #         jnp.tile(
-    #             jnp.arange(output.shape[1])[None, :, None], (batch_size, 1, nb_outputs)
-    #         )
-    #         - 300
-    #     )
-    #     + 300
-    # )
-    # t_fs = jnp.min(fs, axis=1)
-    # loss_val = optax.softmax_cross_entropy(-t_fs, y).mean()
-
-    return loss_val
+    fs = (
+        output
+        * (
+            jnp.tile(
+                jnp.arange(output.shape[1])[None, :, None], (batch_size, 1, nb_outputs)
+            )
+            - 300
+        )
+        + 300
+    )
+    t_fs = jnp.min(fs, axis=1) / 300
+    loss_val = optax.softmax_cross_entropy(-t_fs, y).mean()
+    loss_reg = jnp.sum(y * jnp.exp(t_fs), axis=1).mean()
+    return loss_val + args.reg * loss_reg
 
 
 @jax.jit
 def accuracy_fn(output, y):
-    # fs = (
-    #     output
-    #     * (
-    #         jnp.tile(
-    #             jnp.arange(output.shape[1])[None, :, None], (batch_size, 1, nb_outputs)
-    #         )
-    #         - 300
-    #     )
-    #     + 300
-    # )
-    # t_fs = jnp.min(fs, axis=1)
-    # predicted_class = jnp.argmin(t_fs, axis=1)
-    predicted_class = jnp.argmax(jnp.sum(output, axis=1), axis=1)
+    fs = (
+        output
+        * (
+            jnp.tile(
+                jnp.arange(output.shape[1])[None, :, None], (batch_size, 1, nb_outputs)
+            )
+            - 300
+        )
+        + 300
+    )
+    t_fs = jnp.min(fs, axis=1)
+    predicted_class = jnp.argmin(t_fs, axis=1)
+    # predicted_class = jnp.argmax(jnp.sum(output, axis=1), axis=1)
     return jnp.mean(predicted_class == y)
 
 
@@ -185,13 +185,13 @@ def accuracy_fn(output, y):
 def loss_eval(params, x, y):
     preds = predict(params, x)
     output, charge, _, _, _, _, _, _, _ = preds
-    # loss_val = loss_fn(output, y)
+    loss_val = loss_fn(output, y)
 
-    loss_cha = loss_fn(charge, y)
-    loss_spk = loss_fn(output, y)
-    loss_val = (
-        loss_cha + loss_spk + args.reg * jnp.mean((jnp.sum(output, axis=1) - 10) ** 2)
-    )
+    # loss_cha = loss_fn(charge, y)
+    # loss_spk = loss_fn(output, y)
+    # loss_val = (
+    #     loss_cha + loss_spk + args.reg * jnp.mean((jnp.sum(output, axis=1) - 10) ** 2)
+    # )
     return loss_val
 
 
@@ -202,7 +202,7 @@ if args.optimizer == "adamax":
 elif args.optimizer == "sgd":
     opt = optax.sgd(learning_rate=args.lr)
 else:
-    raise "Unknown optimizer"
+    raise ValueError("Unknown optimizer")
 
 opt_state = opt.init(params)
 
@@ -222,28 +222,28 @@ for _ in pbar:
     x_test, y_test = shuffle(testset, jax.random.key(0), batch_size)
     loss_test = []
     accuracy_test = []
-    accuracy_charge_test = []
+    # accuracy_charge_test = []
     for x, y in zip(x_test, y_test):
         preds = predict(params, x)
         output, charge, V, P, h2, spks, h1, enc_spk, encoder_currents = preds
 
-        loss_cha = loss_fn(charge, jax.nn.one_hot(y, nb_outputs))
-        loss_spk = loss_fn(output, jax.nn.one_hot(y, nb_outputs))
-        loss_val = (
-            loss_cha
-            + loss_spk
-            + args.reg * jnp.mean((jnp.sum(output, axis=1) - 10) ** 2)
-        )
-        # loss_val = loss_fn(output, jax.nn.one_hot(y, nb_outputs))
+        # loss_cha = loss_fn(charge, jax.nn.one_hot(y, nb_outputs))
+        # loss_spk = loss_fn(output, jax.nn.one_hot(y, nb_outputs))
+        # loss_val = (
+        #     loss_cha
+        #     + loss_spk
+        #     + args.reg * jnp.mean((jnp.sum(output, axis=1) - 10) ** 2)
+        # )
+        loss_val = loss_fn(output, jax.nn.one_hot(y, nb_outputs))
         accuracy = accuracy_fn(output, y)
-        accuracy_charge = accuracy_fn(charge, y)
+        # accuracy_charge = accuracy_fn(charge, y)
 
         loss_test.append(loss_val)
         accuracy_test.append(accuracy)
-        accuracy_charge_test.append(accuracy_charge)
+        # accuracy_charge_test.append(accuracy_charge)
     loss_test = jnp.mean(jnp.asarray(loss_test))
     accuracy_test = jnp.mean(jnp.asarray(accuracy_test))
-    accuracy_charge_test = jnp.mean(jnp.asarray(accuracy_charge_test))
+    # accuracy_charge_test = jnp.mean(jnp.asarray(accuracy_charge_test))
 
     pbar.set_postfix(
         {
@@ -257,7 +257,7 @@ for _ in pbar:
             {
                 "default": loss_test.item(),
                 "Accuracy": accuracy_test.item(),
-                "Accuracy (charge)": accuracy_charge_test.item(),
+                # "Accuracy (charge)": accuracy_charge_test.item(),
                 "Loss train": loss_train.item(),
                 "Loss test": loss_test.item(),
             }
@@ -268,7 +268,7 @@ if args.nni:
         {
             "default": accuracy_test.item(),
             "Accuracy": accuracy_test.item(),
-            "Accuracy (charge)": accuracy_charge_test.item(),
+            # "Accuracy (charge)": accuracy_charge_test.item(),
             "Loss train": loss_train.item(),
             "Loss test": loss_test.item(),
         }
@@ -282,16 +282,16 @@ else:
         preds = predict(params, x)
         output, charge, V, P, h2, spks, h1, enc_spk, encoder_currents = preds
 
-        loss_cha = loss_fn(charge, jax.nn.one_hot(y, nb_outputs))
-        loss_spk = loss_fn(output, jax.nn.one_hot(y, nb_outputs))
-        loss_val = (
-            loss_cha
-            + loss_spk
-            + args.reg * jnp.mean((jnp.sum(output, axis=1) - 10) ** 2)
-        )
-        # loss_val = loss_fn(output, jax.nn.one_hot(y, nb_outputs))
-        accuracy = accuracy_fn(output, y)
-        accuracy_charge = accuracy_fn(charge, y)
+        # loss_cha = loss_fn(charge, jax.nn.one_hot(y, nb_outputs))
+        # loss_spk = loss_fn(output, jax.nn.one_hot(y, nb_outputs))
+        # loss_val = (
+        #     loss_cha
+        #     + loss_spk
+        #     + args.reg * jnp.mean((jnp.sum(output, axis=1) - 10) ** 2)
+        # )
+        loss_val = loss_fn(output, jax.nn.one_hot(y, nb_outputs))
+        # accuracy = accuracy_fn(output, y)
+        # accuracy_charge = accuracy_fn(charge, y)
 
         tgts.append(y)
         predicted_class.append(jnp.argmax(jnp.sum(output, axis=1), axis=1))
