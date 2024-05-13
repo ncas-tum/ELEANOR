@@ -7,13 +7,14 @@ import nni
 import numpy as np
 import optax
 from dataset import loadBraille, loadShd, shuffle
-from network import network_builder_FELIF
+from network import network_builder
 from sklearn import metrics as skmetrics
 from spyx.axn import tanh
 from spyx.loaders import SHD_loader
 from tqdm import trange
 
 plt.style.use("dark_background")
+plt.rcParams['savefig.dpi'] = 600
 
 
 def plot_spk_charge(spk_in, charge, V, P, spk_out, title):
@@ -109,7 +110,7 @@ beta = float(np.exp(-10. / args.tau_mem))  # Change to real dt
 shd_dl =SHD_loader(batch_size,nb_steps,nb_inputs, 0.2) # Batch, time, channels, % validation
 
 # Network builder
-predict = network_builder_FELIF(
+predict = network_builder(
     # Network params
     nb_hidden,
     nb_outputs,
@@ -192,21 +193,21 @@ def accuracy_fn(output, y):
 def loss_eval(params, x, y):
     preds = predict(params, x)
     # output, charge, _, _, _, _, _, _, _ = preds
-    # output, _, _, _ = preds
+    output, _, _, _ = preds
     # _, charge, _, _ = preds
-    Uncomment for charge
-    output, charge, V, P, h2, spks, h1 = preds     
+    # Uncomment for charge
+    # output, charge, V, P, h2, spks, h1 = preds     
 
-    # loss_val = loss_fn(output, y)
+    loss_val = loss_fn(output, y)
 
-    loss_cha = loss_fn(charge, y)
+    # loss_cha = loss_fn(charge, y)
 
 
     # loss_spk = loss_fn(output, y)
     # loss_val = (
     #     loss_cha + loss_spk + args.reg * jnp.mean((jnp.sum(output, axis=1) - 10) ** 2)
     # )
-    return loss_cha
+    return loss_val
 
 
 surrogate_grad = jax.value_and_grad(loss_eval)
@@ -249,16 +250,16 @@ for _ in pbar:
     for x, y in zip(x_val, y_val):
         x = jnp.unpackbits(x, axis=1)
         preds = predict(params, x)
-        output, charge, V, P, h2, spks, h1, enc_spk, encoder_currents = preds
+        # output, charge, V, P, h2, spks, h1, enc_spk, encoder_currents = preds
         
         
         # output, charge, V, P, h2, spks, h1 = preds     
-        # output, _, _, _= preds
+        output, _, _, _= preds
         #_, charge, _, _=preds
 
         # Uncomment for charge  based acc
-        loss_cha = loss_fn(charge, jax.nn.one_hot(y, nb_outputs))
-        accuracy_charge = accuracy_fn(charge, y)
+        # loss_cha = loss_fn(charge, jax.nn.one_hot(y, nb_outputs))
+        # accuracy_charge = accuracy_fn(charge, y)
         
 
         # loss_spk = loss_fn(output, jax.nn.one_hot(y, nb_outputs))
@@ -268,30 +269,30 @@ for _ in pbar:
         #     + args.reg * jnp.mean((jnp.sum(output, axis=1) - 10) ** 2)
         # )
         # Uncomment for output based acc
-        # loss_val = loss_fn(output, jax.nn.one_hot(y, nb_outputs))
-        # accuracy = accuracy_fn(output, y)
+        loss_val = loss_fn(output, jax.nn.one_hot(y, nb_outputs))
+        accuracy = accuracy_fn(output, y)
        
-        # loss_test.append(loss_val)
-        loss_cha_test.append(loss_cha)
-        # accuracy_test.append(accuracy)
-        accuracy_charge_test.append(accuracy_charge)
+        loss_test.append(loss_val)
+        # loss_cha_test.append(loss_cha)
+        accuracy_test.append(accuracy)
+        # accuracy_charge_test.append(accuracy_charge)
        
-    # loss_test = jnp.mean(jnp.asarray(loss_test))
-    loss_cha_test = jnp.mean(jnp.asarray(loss_cha_test))
-    # accuracy_test = jnp.mean(jnp.asarray(accuracy_test))
-    accuracy_charge_test = jnp.mean(jnp.asarray(accuracy_charge_test))
+    loss_test = jnp.mean(jnp.asarray(loss_test))
+    # loss_cha_test = jnp.mean(jnp.asarray(loss_cha_test))
+    accuracy_test = jnp.mean(jnp.asarray(accuracy_test))
+    # accuracy_charge_test = jnp.mean(jnp.asarray(accuracy_charge_test))
 
     pbar.set_postfix(
         {
             # "Loss": loss_train,
             # "Accuracy": accuracy_test,
             "Loss": loss_train,
-            "Accuracy (charge)": accuracy_charge_test,
+            "Accuracy (charge)": accuracy_test,
         }
     )
 
-
-    accuracy_history.append(accuracy_charge_test)
+    # print (accuracy_test)
+    accuracy_history.append(accuracy_test)
 
 
     if args.nni:
@@ -323,21 +324,21 @@ else:
         x = jnp.unpackbits(x, axis=1)
         preds = predict(params, x)
         # output, charge, V, P, h2, spks, h1, enc_spk, encoder_currents = preds
-        # output, _, _, _ = preds
+        output, _, _, _ = preds
         # _, charge, _, _ = preds
-        output, charge, V, P, h2, spks, h1 = preds     
+        # output, charge, V, P, h2, spks, h1 = preds     
 
 
-        loss_cha = loss_fn(charge, jax.nn.one_hot(y, nb_outputs))
+        # loss_cha = loss_fn(charge, jax.nn.one_hot(y, nb_outputs))
         # loss_spk = loss_fn(output, jax.nn.one_hot(y, nb_outputs))
         # loss_val = (
         #     loss_cha
         #     + loss_spk
         #     + args.reg * jnp.mean((jnp.sum(output, axis=1) - 10) ** 2)
         # )
-        # loss_val = loss_fn(output, jax.nn.one_hot(y, nb_outputs))
-        # accuracy = accuracy_fn(output, y)
-        accuracy_charge = accuracy_fn(charge, y)
+        loss_val = loss_fn(output, jax.nn.one_hot(y, nb_outputs))
+        accuracy = accuracy_fn(output, y)
+        # accuracy_charge = accuracy_fn(charge, y)
 
         tgts.append(y)
         predicted_class.append(jnp.argmax(jnp.sum(output, axis=1), axis=1))
@@ -361,10 +362,30 @@ else:
     plt.plot(n_epochs, accuracy_history)
     plt.xlabel("Epochs")
     plt.ylabel("Accuracy")
-    plt.savefig("/home/s5663938/Desktop/SRP/SRP/acc_plot_FELIF.png")
+    plt.savefig("/home/s5663938/Desktop/SRP/SRP/acc_plot_lif.png")
+
+np.savez('acc_epoch_LIF_output', N=n_epochs, ACC=accuracy_history)
+
+plt.figure()
+w1_diff = w1_history[len(w1_history)-1] - w1_history[0]
+plt.imshow(w1_diff)
+plt.colorbar()
+plt.savefig("/home/s5663938/Desktop/SRP/SRP/w1_lif.png")
+
+plt.figure()
+w2_diff = w2_history[len(w2_history)-1] - w2_history[0]
+plt.imshow(w2_diff)
+plt.colorbar()
+plt.savefig("/home/s5663938/Desktop/SRP/SRP/w2_lif.png")
 
 
-    # breakpoint()
+
+
+  
+ 
+# convert datetime obj to string
+
+# breakpoint()
 
     
 

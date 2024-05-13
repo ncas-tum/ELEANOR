@@ -194,7 +194,7 @@ def loss_eval(params, x, y):
     # output, charge, _, _, _, _, _, _, _ = preds
     # output, _, _, _ = preds
     # _, charge, _, _ = preds
-    Uncomment for charge
+    # Uncomment for charge
     output, charge, V, P, h2, spks, h1 = preds     
 
     # loss_val = loss_fn(output, y)
@@ -249,10 +249,10 @@ for _ in pbar:
     for x, y in zip(x_val, y_val):
         x = jnp.unpackbits(x, axis=1)
         preds = predict(params, x)
-        output, charge, V, P, h2, spks, h1, enc_spk, encoder_currents = preds
+        # output, charge, V, P, h2, spks, h1, enc_spk, encoder_currents = preds
         
         
-        # output, charge, V, P, h2, spks, h1 = preds     
+        output, charge, V, P, h2, spks, h1 = preds     
         # output, _, _, _= preds
         #_, charge, _, _=preds
 
@@ -365,10 +365,19 @@ else:
 
 
     # breakpoint()
-
+np.savez('acc_epoch_FELIF_output', N=n_epochs, ACC=accuracy_history)
     
+plt.figure()
+w1_diff = w1_history[len(w1_history)-1] - w1_history[0]
+plt.imshow(w1_diff)
+plt.colorbar()
+plt.savefig("/home/s5663938/Desktop/SRP/SRP/w1_felif.png")
 
-
+plt.figure()
+w2_diff = w2_history[len(w2_history)-1] - w2_history[0]
+plt.imshow(w2_diff)
+plt.colorbar()
+plt.savefig("/home/s5663938/Desktop/SRP/SRP/w2_felif.png")
 
 
     # plt.figure()
