@@ -103,7 +103,7 @@ def loadBraille(nb_upsample, nb_repetitions):
     nb_steps = (
         nb_upsample * data_steps
     )  # TODO We should change this and upsample the input data
-    nb_outputs = len(np.unique(labels)) + 1
+    nb_outputs = len(np.unique(labels))  # + 1
 
     return (
         (x_train, y_train),

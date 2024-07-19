@@ -6,13 +6,14 @@ import matplotlib.pyplot as plt
 import nni
 import numpy as np
 import optax
+import seaborn as sns
 from dataset import loadBraille, shuffle
 from network import network_builder
 from sklearn import metrics as skmetrics
 from spyx.axn import tanh
 from tqdm import trange
 
-plt.style.use("dark_background")
+# plt.style.use("dark_background")
 
 
 def plot_spk_charge(spk_in, charge, V, P, spk_out, title):
@@ -57,8 +58,9 @@ def plot_spk_charge(spk_in, charge, V, P, spk_out, title):
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--lr", type=float, default=0.008654453540431036)
+parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--reg", type=float, default=1e-3)
-parser.add_argument("--nb_epochs", type=int, default=300)
+parser.add_argument("--nb_epochs", type=int, default=200)
 parser.add_argument("--nb_hidden", type=int, default=256)
 parser.add_argument("--nb_repetitions", type=int, default=200)
 parser.add_argument("--nb_upsample", type=int, default=2)
@@ -120,7 +122,7 @@ predict = network_builder(
 
 # Parameters creation
 # Encoder
-key = jax.random.key(0)
+key = jax.random.key(args.seed)
 key, subkey1, subkey2, subkey3, subkey4, subkey5 = jax.random.split(key, 6)
 enc_gain = jax.random.normal(subkey1, shape=(nb_inputs,)) * args.enc_weight_scale
 enc_bias = jax.random.normal(subkey1, shape=(nb_inputs,))
@@ -143,55 +145,30 @@ params = [{"gain": enc_gain, "bias": enc_bias}, w1, w2]
 
 @jax.jit
 def loss_fn(output, y, firing_rate=10.0):
-    # m = jnp.sum(output, axis=1)  # Sum over time
+    m = jnp.sum(output, axis=1)  # Sum over time
     # loss_val = jnp.mean((m - y * firing_rate) ** 2)
-    # loss_val = optax.softmax_cross_entropy(m, y).mean()
-
-    fs = (
-        output
-        * (
-            jnp.tile(
-                jnp.arange(output.shape[1])[None, :, None], (batch_size, 1, nb_outputs)
-            )
-            - 300
-        )
-        + 300
-    )
-    t_fs = jnp.min(fs, axis=1) / 300
-    loss_val = optax.softmax_cross_entropy(-t_fs, y).mean()
-    loss_reg = jnp.sum(y * jnp.exp(t_fs), axis=1).mean()
-    return loss_val + args.reg * loss_reg
+    loss_val = optax.softmax_cross_entropy(m, y).mean()
+    return loss_val
 
 
 @jax.jit
 def accuracy_fn(output, y):
-    fs = (
-        output
-        * (
-            jnp.tile(
-                jnp.arange(output.shape[1])[None, :, None], (batch_size, 1, nb_outputs)
-            )
-            - 300
-        )
-        + 300
-    )
-    t_fs = jnp.min(fs, axis=1)
-    predicted_class = jnp.argmin(t_fs, axis=1)
-    # predicted_class = jnp.argmax(jnp.sum(output, axis=1), axis=1)
+    predicted_class = jnp.argmax(jnp.sum(output, axis=1), axis=1)
     return jnp.mean(predicted_class == y)
 
 
 # @jax.jit
 def loss_eval(params, x, y):
     preds = predict(params, x)
-    output, charge, _, _, _, _, _, _, _ = preds
-    loss_val = loss_fn(output, y)
+    output, _, _, _, _, _ = preds
+    # output, _, _, _, _, _, _, _, _ = preds
+    # loss_val = loss_fn(output, y)
 
     # loss_cha = loss_fn(charge, y)
-    # loss_spk = loss_fn(output, y)
-    # loss_val = (
-    #     loss_cha + loss_spk + args.reg * jnp.mean((jnp.sum(output, axis=1) - 10) ** 2)
-    # )
+    loss_spk = loss_fn(output, y)
+    loss_val = loss_spk + args.reg * jnp.mean(
+        (jnp.mean(jnp.sum(output, axis=1), axis=-1) - 50) ** 2
+    )
     return loss_val
 
 
@@ -206,8 +183,10 @@ else:
 
 opt_state = opt.init(params)
 
+total_accuracy = []
+total_loss = []
 pbar = trange(args.nb_epochs)
-for _ in pbar:
+for epoch in pbar:
     key, epoch_key = jax.random.split(key)
     x_train, y_train = shuffle(trainset, epoch_key, batch_size)
     loss_train = []
@@ -222,29 +201,40 @@ for _ in pbar:
     x_test, y_test = shuffle(testset, jax.random.key(0), batch_size)
     loss_test = []
     accuracy_test = []
+    tgts = []
+    predicted_class = []
     # accuracy_charge_test = []
     for x, y in zip(x_test, y_test):
         preds = predict(params, x)
-        output, charge, V, P, h2, spks, h1, enc_spk, encoder_currents = preds
+        # output, C, V, P, h2, spks, h1, enc_spk, encoder_currents = preds
+        output, h2, spks, h1, enc_spk, encoder_currents = preds
 
         # loss_cha = loss_fn(charge, jax.nn.one_hot(y, nb_outputs))
-        # loss_spk = loss_fn(output, jax.nn.one_hot(y, nb_outputs))
-        # loss_val = (
-        #     loss_cha
-        #     + loss_spk
-        #     + args.reg * jnp.mean((jnp.sum(output, axis=1) - 10) ** 2)
-        # )
-        loss_val = loss_fn(output, jax.nn.one_hot(y, nb_outputs))
+        loss_spk = loss_fn(output, jax.nn.one_hot(y, nb_outputs))
+        loss_val = (
+            # loss_cha
+            loss_spk
+            + args.reg
+            * jnp.mean((jnp.mean(jnp.sum(output, axis=1), axis=-1) - 50) ** 2)
+        )
+        # loss_val = loss_fn(output, jax.nn.one_hot(y, nb_outputs))
         accuracy = accuracy_fn(output, y)
         # accuracy_charge = accuracy_fn(charge, y)
 
         loss_test.append(loss_val)
         accuracy_test.append(accuracy)
+
+        tgts.append(y)
+        predicted_class.append(jnp.argmax(jnp.sum(output, axis=1), axis=1))
         # accuracy_charge_test.append(accuracy_charge)
     loss_test = jnp.mean(jnp.asarray(loss_test))
     accuracy_test = jnp.mean(jnp.asarray(accuracy_test))
     # accuracy_charge_test = jnp.mean(jnp.asarray(accuracy_charge_test))
+    tgts = jnp.concatenate(tgts)
+    predicted_class = jnp.concatenate(predicted_class)
 
+    total_accuracy.append(accuracy_test)
+    total_loss.append(loss_train)
     pbar.set_postfix(
         {
             "Loss": loss_train,
@@ -263,6 +253,28 @@ for _ in pbar:
             }
         )
 
+    if (epoch % 10) == 0:
+        fig, ax = plt.subplots(figsize=(10, 5))
+        ax.set_xlabel("Epoch")
+        ax.plot(total_accuracy, color=sns.color_palette()[0])
+
+        ax.set_ylabel("Accuracy", color=sns.color_palette()[0])
+        ax.tick_params(axis="y", labelcolor=sns.color_palette()[0])
+        ax2 = ax.twinx()
+        ax2.plot(total_loss, color=sns.color_palette()[1])
+
+        ax2.set_ylabel("Loss", color=sns.color_palette()[1])
+        ax2.tick_params(axis="y", labelcolor=sns.color_palette()[1])
+        ax2.grid(None)
+        plt.title(f"Epoch {epoch}")
+        plt.tight_layout()
+        plt.savefig("outputLIF/metrics.pdf", transparent=True)
+
+        confusion_matrix = skmetrics.confusion_matrix(tgts, predicted_class)
+        cm_display = skmetrics.ConfusionMatrixDisplay(confusion_matrix=confusion_matrix)
+        cm_display.plot()
+        plt.savefig("outputLIF/cm.pdf")
+
 if args.nni:
     nni.report_final_result(
         {
@@ -274,35 +286,107 @@ if args.nni:
         }
     )
 else:
+    jnp.save("outputLIF/accuracy.npy", total_accuracy)
+    jnp.save("outputLIF/loss.npy", total_loss)
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.set_xlabel("Epoch")
+    ax.plot(total_accuracy, color=sns.color_palette()[0])
+
+    ax.set_ylabel("Accuracy", color=sns.color_palette()[0])
+    ax.tick_params(axis="y", labelcolor=sns.color_palette()[0])
+    ax2 = ax.twinx()
+    ax2.plot(total_loss, color=sns.color_palette()[1])
+
+    ax2.set_ylabel("Loss", color=sns.color_palette()[1])
+    ax2.tick_params(axis="y", labelcolor=sns.color_palette()[1])
+    ax2.grid(None)
+    plt.tight_layout()
+    plt.savefig("outputLIF/metrics.pdf", transparent=True)
+
     x_test, y_test = shuffle(testset, key, batch_size)
 
     tgts = []
     predicted_class = []
     for x, y in zip(x_test, y_test):
         preds = predict(params, x)
-        output, charge, V, P, h2, spks, h1, enc_spk, encoder_currents = preds
+        output, _, _, _, _, _ = preds
+        # output, _, _, _, _, _, _, _, _ = preds
 
-        # loss_cha = loss_fn(charge, jax.nn.one_hot(y, nb_outputs))
-        # loss_spk = loss_fn(output, jax.nn.one_hot(y, nb_outputs))
-        # loss_val = (
-        #     loss_cha
-        #     + loss_spk
-        #     + args.reg * jnp.mean((jnp.sum(output, axis=1) - 10) ** 2)
-        # )
-        loss_val = loss_fn(output, jax.nn.one_hot(y, nb_outputs))
-        # accuracy = accuracy_fn(output, y)
-        # accuracy_charge = accuracy_fn(charge, y)
-
+        # loss_val = loss_fn(output, jax.nn.one_hot(y, nb_outputs))
+        accuracy = accuracy_fn(output, y)
         tgts.append(y)
         predicted_class.append(jnp.argmax(jnp.sum(output, axis=1), axis=1))
     tgts = jnp.concatenate(tgts)
     predicted_class = jnp.concatenate(predicted_class)
 
+    jnp.save("outputLIF/tgts.npy", tgts)
+    jnp.save("outputLIF/predicted_class.npy", predicted_class)
+
     confusion_matrix = skmetrics.confusion_matrix(tgts, predicted_class)
     cm_display = skmetrics.ConfusionMatrixDisplay(confusion_matrix=confusion_matrix)
     cm_display.plot()
-    plt.savefig("cm.png")
-    plt.figure()
-    plot_spk_charge(
-        enc_spk, charge, V, P, output, "Braille dataset with FeLIF Neuron outputs"
-    )
+    plt.savefig("outputLIF/cm.pdf")
+
+    # x, y = next(iter(zip(x_test, y_test)))
+    # preds = predict(params, x)
+    # S, _, spk_rec, _, _, _ = preds
+    # S, C, V, P, _, spk_rec, _, _, _ = preds
+
+    # jnp.save('output/S.npy', S)
+    # jnp.save('output/C.npy', C)
+    # jnp.save('output/V.npy', V)
+    # jnp.save('output/P.npy', P)
+    # jnp.save('output/spk_rec.npy', spk_rec)
+    # V = jnp.concatenate(V[0])
+    # P = jnp.concatenate(P[0])
+    # S = jnp.concatenate(S[0])
+    # C = jnp.concatenate(C[0])
+    # V = V[0]
+    # P = P[0]
+    # S = S[0]
+    # C = C[0]
+    # plt.figure()
+    # plot_spk_charge(
+    #     enc_spk, C, V, P, output, "Braille dataset with FeLIF Neuron outputs"
+    # )
+
+    # idx = jnp.argmax(jnp.sum(S, axis=0))
+    # _, ax = plt.subplots(
+    #     5,
+    #     1,
+    #     figsize=(12, 10),
+    #     sharex=True,
+    #     gridspec_kw={"height_ratios": [0.6, 1, 1, 1, 0.6]},
+    # )
+
+    # # Plot input current
+    # tdx, ndx = jnp.where(spk_rec[0])
+    # ax[0].scatter(tdx, ndx, s=4, c="k", marker=".")
+    # ax[0].set_ylabel("Input Spikes")
+    # ax[0].set_yticks([])
+
+    # # Plot membrane potential
+    # ax[1].plot(V[:, idx])
+    # ax[1].axhline(y=args.V_thr, linestyle='--')
+    # ax[1].set_ylabel("Voltage")
+    # ax[1].set_xlabel("Time step")
+
+    # # Plot membrane potential
+    # ax[2].plot(P[:, idx])
+    # ax[2].set_ylabel("Polarization")
+    # ax[2].set_xlabel("Time step")
+
+    # # Plot membrane potential
+    # ax[3].plot(C[:, idx])
+    # # ax[3].axhline(y=6.4500250718112735, linestyle='--')
+    # ax[3].set_ylabel("Internal charge")
+    # ax[3].set_xlabel("Time step")
+
+    # ax[4].axhline(y=idx, c="green", linestyle='-')
+    # ax[4].scatter(*jnp.where(S), s=4, c="k", marker=".")
+    # ax[4].set_ylabel("Output Spikes")
+    # ax[4].set_yticks([])
+
+    # # plt.show()
+    # plt.savefig("output/braille.pdf")

@@ -1,6 +1,6 @@
 import jax
 import jax.numpy as jnp
-from spyx.axn import superspike
+from spyx.axn import custom, superspike
 
 
 def FeLIF(
@@ -40,92 +40,104 @@ def FeLIF(
     C_tot = C_0 + C_par
     cap_divider = eps_int / (t_hzo * eps_hzo + t_int * eps_int)
     depol_divider = 1 / _eps0 * t_int / (t_hzo * eps_hzo + t_int * eps_int)
-    threshold = V_thr * C_tot + P_s * A
 
     if spike_fn is None:
         spike_fn = superspike()
 
-    def _derivative(V, P, input_):
-        E = V * cap_divider - P * depol_divider
-        tau = jax.lax.stop_gradient(
-            tau_0 * jnp.exp((E_a / (jnp.abs(E) + soft_E)) ** alpha)
-        )
+    _tau_fn = custom(
+        lambda x: 1 / x,
+        lambda x: tau_0 * jnp.exp((E_a / (jnp.abs(x) + soft_E)) ** alpha),
+    )
+
+    def _derivative2(v, p):
+        E = v * cap_divider - p * depol_divider
+        tau = _tau_fn(E)
+
+        I_leak = I_0 * A * jnp.expm1(v / V_t) + I_dsc * jnp.sign(v)
+        I_p = (jnp.sign(E) * P_s - p) * A / jax.lax.stop_gradient(tau)
+
+        dv = (1 / C_tot) * (-I_leak - I_p)
+        dp = I_p / A
+
+        return (dv, dp)
+
+    def _derivative(state, input_):
+        (v, p) = state
+
+        E = v * cap_divider - p * depol_divider
+        # tau = tau_0 * _exp_fn(
+        #     (E_a / (jnp.abs(E) + soft_E)) ** alpha
+        # )
+        tau = _tau_fn(E)
         tau = jnp.clip(tau, 1.1e-7, 1.1e7)
 
-        I_leak = jax.lax.stop_gradient(
-            (I_0 * A * jnp.expm1(V / V_t) + I_dsc) * jnp.sign(V)
-        )
-        I_p = (jnp.sign(E) * P_s - P) * A / tau
+        I_leak = (I_0 * A * jnp.expm1(v / V_t) + I_dsc) * jnp.sign(v)
+        I_p = (jnp.sign(E) * P_s - p) * A / tau
 
         # Limit the currents to 100uA
         I_p = jnp.clip(I_p, -100e-6 * paramsScale, 100e-6 * paramsScale)
         I_leak = jnp.clip(I_leak, -100e-6 * paramsScale, 100e-6 * paramsScale)
 
         dv = (1 / C_tot) * (input_ - I_leak - I_p)
-        dP = I_p / A
+        dp = I_p / A
 
-        return dv, dP
+        return dv, dp
 
-    def _inner_loop(state, input_):
-        [V, P, spikes] = state
-        dv, dP = _derivative(V, P, input_)
+    @jax.jit
+    def inner_loop(state, input_):
+        (v, p, s) = state
 
-        V_new = V + (1 - spikes) * dt / innerStep * dv
-        P_new = P + (1 - spikes) * dt / innerStep * dP
+        (dv, dp) = _derivative((v, p), input_)
 
-        # Limit voltage and polarization
-        V_new = jnp.clip(V_new, 0, 5)
-        P_new = jnp.clip(P_new, -P_s, P_s)
+        v_new = v + (1 - s) * dt / innerStep * dv
+        p_new = p + (1 - s) * dt / innerStep * dp
 
-        charge = V_new * C_tot + P_new * A
-        spikes = spike_fn(charge - threshold)
+        v_new = jnp.clip(v_new, 0, 5)
+        p_new = jnp.clip(p_new, -P_s, P_s)
 
-        return [V_new, P_new, spikes], None
+        s_new = spike_fn(v_new - V_thr)
+
+        return (v_new, p_new, s_new), None
 
     def step(state, input_):
-        V, P, charge = state
+        v, p = state
 
         # Inner loop with 10us pulse input current
         last_state, _ = jax.lax.scan(
-            _inner_loop,
-            [V, P, jnp.zeros_like(charge)],
+            inner_loop,
+            (v, p, jnp.zeros_like(v)),
             jnp.stack(
                 [input_ * 1e5 * C_tot] * 10  # Convert the input into current
                 + [jnp.zeros_like(input_)] * (innerStep - 10)  # 10 us current
             ),
             innerStep,
-            unroll=20,
+            unroll=1,
         )
-        [V_inner, P_inner, _] = last_state
-        dv, dP = _derivative(V, P, jnp.zeros_like(input_))
-        V_upper = V + dt * dv + input_
-        P_upper = P + dt * dP
+        (v_inner, p_inner, _) = last_state
+
+        dv, dp = _derivative2(v, p)
+
+        v_upper = v + dt * dv + input_
+        p_upper = p + dt * dp
 
         # Limit voltage and polarization
-        V_upper = jnp.clip(V_upper, 0, 5)
-        P_upper = jnp.clip(P_upper, -P_s, P_s)
+        v_upper = jnp.clip(v_upper, 0, 5)
+        p_upper = jnp.clip(p_upper, -P_s, P_s)
 
-        V_new = (
-            jax.lax.stop_gradient(V_inner) + V_upper - jax.lax.stop_gradient(V_upper)
-        )
-        P_new = (
-            jax.lax.stop_gradient(P_inner) + P_upper - jax.lax.stop_gradient(P_upper)
-        )
+        v_ste = v_upper + jax.lax.stop_gradient(v_inner - v_upper)
+        p_ste = p_upper + jax.lax.stop_gradient(p_inner - p_upper)
 
-        charge_new = V_new * C_tot + P_new * A
+        spikes = spike_fn(v_ste - V_thr)
+        v_new = (1 - spikes) * v_ste
+        p_new = (1 - spikes) * p_ste - (spikes * P_s)
 
-        spikes = spike_fn(charge_new - threshold)
-        V = (1 - spikes) * V_new
-        P = (1 - spikes) * P_new - (spikes * P_s)
-
-        return (V, P, charge_new), (spikes, charge_new, V, P)
+        return (v_new, p_new), (spikes, v_new * C_tot + p_new * A, v_new, p_new)
 
     def initial_state(nb_neurons):
         V0 = jnp.zeros((nb_neurons,))
         P0 = jnp.zeros((nb_neurons,)) - P_s
-        C0 = V0 * C_tot + P0 * A
 
-        return (V0, P0, C0)
+        return (V0, P0)
 
     return jax.jit(step), initial_state
 

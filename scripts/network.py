@@ -67,6 +67,17 @@ def network_builder(
 
         return (new_syn, new_mem), new_mem
 
+    felif_step, felif_reset = FeLIF(
+        dt=1e-3,
+        innerStep=1000,
+        A=A,
+        I_dsc=I_dsc,
+        V_thr=V_thr,
+        P_s=P_s,
+        spike_fn=spike_fn,
+        paramsScale=1e12,
+    )
+
     @jax.jit
     def predict(params, input_):
         encoder_currents = params[0]["gain"] * (
@@ -86,26 +97,10 @@ def network_builder(
         _, spk_rec = jax.lax.scan(hidden_step, (syn, mem, out), h1, nb_steps, unroll=1)
 
         h2 = jnp.dot(spk_rec, params[2])
-        felif_step, felif_reset = FeLIF(
-            dt=1e-3,
-            innerStep=1000,
-            A=A,
-            I_dsc=I_dsc,
-            V_thr=V_thr,
-            P_s=P_s,
-            spike_fn=spike_fn,
-            paramsScale=1e12,
-        )
-
-        # _, out_rec = jax.lax.scan(output_step, (syn2, mem2), h2, nb_steps, unroll=1)
-        _, (out_rec, charge, V_rec, P_Rec) = jax.lax.scan(
-            felif_step,
-            felif_reset(nb_outputs),
-            h2,
-            nb_steps,
-            unroll=1,
-        )
-        return out_rec, charge, V_rec, P_Rec, h2, spk_rec, h1, enc_spk, encoder_currents
+        syn2 = jnp.zeros((nb_outputs,))
+        mem2 = jnp.zeros((nb_outputs,))
+        _, out_rec = jax.lax.scan(output_step, (syn2, mem2), h2, nb_steps, unroll=1)
+        return out_rec, h2, spk_rec, h1, enc_spk, encoder_currents
 
     batched_predict = vmap(predict, in_axes=(None, 0))
 
