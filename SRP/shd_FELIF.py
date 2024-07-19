@@ -103,10 +103,12 @@ nb_steps = 128
 nb_inputs = 128
 nb_hidden = args.nb_hidden
 nb_outputs = 20
-alpha = float(np.exp(-10. / args.tau_syn)) # Change to real dt
-beta = float(np.exp(-10. / args.tau_mem))  # Change to real dt
+alpha = float(np.exp(-10.0 / args.tau_syn))  # Change to real dt
+beta = float(np.exp(-10.0 / args.tau_mem))  # Change to real dt
 
-shd_dl =SHD_loader(batch_size,nb_steps,nb_inputs, 0.2) # Batch, time, channels, % validation
+shd_dl = SHD_loader(
+    batch_size, nb_steps, nb_inputs, 0.2
+)  # Batch, time, channels, % validation
 
 # Network builder
 predict = network_builder_FELIF(
@@ -195,12 +197,11 @@ def loss_eval(params, x, y):
     # output, _, _, _ = preds
     # _, charge, _, _ = preds
     # Uncomment for charge
-    output, charge, V, P, h2, spks, h1 = preds     
+    output, charge, V, P, h2, spks, h1 = preds
 
     # loss_val = loss_fn(output, y)
 
     loss_cha = loss_fn(charge, y)
-
 
     # loss_spk = loss_fn(output, y)
     # loss_val = (
@@ -220,21 +221,20 @@ else:
 
 opt_state = opt.init(params)
 
-pbar = trange(args.nb_epochs) 
+pbar = trange(args.nb_epochs)
 accuracy_history = []
 w1_history = []
 w2_history = []
 for _ in pbar:
     key, epoch_key = jax.random.split(key)
     loss_train = []
-    
+
     x_train, y_train = shd_dl.train_epoch(epoch_key)
     for x, y in zip(x_train, y_train):
         x = jnp.unpackbits(x, axis=1)
         loss, grads = surrogate_grad(params, x, jax.nn.one_hot(y, nb_outputs))
         updates, opt_state = opt.update(grads, opt_state, params)
         params = optax.apply_updates(params, updates)
-        
 
         loss_train.append(loss)
     loss_train = jnp.mean(jnp.asarray(loss_train))
@@ -250,16 +250,14 @@ for _ in pbar:
         x = jnp.unpackbits(x, axis=1)
         preds = predict(params, x)
         # output, charge, V, P, h2, spks, h1, enc_spk, encoder_currents = preds
-        
-        
-        output, charge, V, P, h2, spks, h1 = preds     
+
+        output, charge, V, P, h2, spks, h1 = preds
         # output, _, _, _= preds
-        #_, charge, _, _=preds
+        # _, charge, _, _=preds
 
         # Uncomment for charge  based acc
         loss_cha = loss_fn(charge, jax.nn.one_hot(y, nb_outputs))
         accuracy_charge = accuracy_fn(charge, y)
-        
 
         # loss_spk = loss_fn(output, jax.nn.one_hot(y, nb_outputs))
         # loss_val = (
@@ -270,12 +268,12 @@ for _ in pbar:
         # Uncomment for output based acc
         # loss_val = loss_fn(output, jax.nn.one_hot(y, nb_outputs))
         # accuracy = accuracy_fn(output, y)
-       
+
         # loss_test.append(loss_val)
         loss_cha_test.append(loss_cha)
         # accuracy_test.append(accuracy)
         accuracy_charge_test.append(accuracy_charge)
-       
+
     # loss_test = jnp.mean(jnp.asarray(loss_test))
     loss_cha_test = jnp.mean(jnp.asarray(loss_cha_test))
     # accuracy_test = jnp.mean(jnp.asarray(accuracy_test))
@@ -290,9 +288,7 @@ for _ in pbar:
         }
     )
 
-
     accuracy_history.append(accuracy_charge_test)
-
 
     if args.nni:
         nni.report_intermediate_result(
@@ -325,8 +321,7 @@ else:
         # output, charge, V, P, h2, spks, h1, enc_spk, encoder_currents = preds
         # output, _, _, _ = preds
         # _, charge, _, _ = preds
-        output, charge, V, P, h2, spks, h1 = preds     
-
+        output, charge, V, P, h2, spks, h1 = preds
 
         loss_cha = loss_fn(charge, jax.nn.one_hot(y, nb_outputs))
         # loss_spk = loss_fn(output, jax.nn.one_hot(y, nb_outputs))
@@ -344,8 +339,7 @@ else:
         # predicted_class.append(jnp.argmax(jnp.sum(charge, axis=1), axis=1))
     tgts = jnp.concatenate(tgts)
     predicted_class = jnp.concatenate(predicted_class)
-    print 
-
+    print
 
     n_epochs = []
 
@@ -355,7 +349,7 @@ else:
 
     plt.savefig("/home/s5663938/Desktop/SRP/SRP/cm.png")
 
-    for j in range(1,len(accuracy_history) + 1):
+    for j in range(1, len(accuracy_history) + 1):
         n_epochs.append(j)
     plt.figure()
     plt.plot(n_epochs, accuracy_history)
@@ -363,24 +357,23 @@ else:
     plt.ylabel("Accuracy")
     plt.savefig("/home/s5663938/Desktop/SRP/SRP/acc_plot_FELIF.png")
 
-
     # breakpoint()
-np.savez('acc_epoch_FELIF_output', N=n_epochs, ACC=accuracy_history)
-    
+np.savez("acc_epoch_FELIF_output", N=n_epochs, ACC=accuracy_history)
+
 plt.figure()
-w1_diff = w1_history[len(w1_history)-1] - w1_history[0]
+w1_diff = w1_history[len(w1_history) - 1] - w1_history[0]
 plt.imshow(w1_diff)
 plt.colorbar()
 plt.savefig("/home/s5663938/Desktop/SRP/SRP/w1_felif.png")
 
 plt.figure()
-w2_diff = w2_history[len(w2_history)-1] - w2_history[0]
+w2_diff = w2_history[len(w2_history) - 1] - w2_history[0]
 plt.imshow(w2_diff)
 plt.colorbar()
 plt.savefig("/home/s5663938/Desktop/SRP/SRP/w2_felif.png")
 
 
-    # plt.figure()
-    # plot_spk_charge(
-    #     enc_spk, charge, V, P, output, "Braille dataset with FeLIF Neuron outputs"
-    # )
+# plt.figure()
+# plot_spk_charge(
+#     enc_spk, charge, V, P, output, "Braille dataset with FeLIF Neuron outputs"
+# )

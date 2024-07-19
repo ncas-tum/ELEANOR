@@ -1,9 +1,9 @@
 import pickle
 
+import h5py
 import jax
 import jax.numpy as jnp
 import numpy as np
-import h5py
 
 
 def shuffle(dataset, shuffle_rng, batch_size):
@@ -24,7 +24,6 @@ def loadNMNIST():
     pass
 
 
-
 """
 https://github.com/kmheckel/spyx/blob/main/research/misc/shd_evo_128c_64h.ipynb
 https://github.com/kmheckel/spyx/blob/main/spyx/fn.py
@@ -36,31 +35,43 @@ https://github.com/kmheckel/spyx/blob/main/spyx/data.py
    La label es la version numerica de la palabra que representa
 5. La palabra textual se puede encontrar usando keys e.g. keys[label[0]] == palabra que corresponde a label en indice
 """
+
+
 def loadShd(nb_upsample, nb_repetitions):
     # todo: Convertir a jpn array, en vez de lista dl np arrays
-    with h5py.File('/home/pedro/neuron_pizzo_jax-main/shd_train.h5') as data:
-        train_times = data['spikes']['times'][:].tolist()
-        train_units = data['spikes']['units'][:].tolist()
-        train_labels = data['labels'][:].tolist()
-        keys = data['extra']['keys'][:].tolist()
-    
-    with h5py.File('/home/pedro/neuron_pizzo_jax-main/shd_test.h5') as data:
-        test_times = data['spikes']['times'][:].tolist()
-        test_units = data['spikes']['units'][:].tolist()
-        test_labels = data['labels'][:].tolist()
-        return train_times, train_units, train_labels, keys, test_times, test_units, test_labels
-'''
+    with h5py.File("/home/pedro/neuron_pizzo_jax-main/shd_train.h5") as data:
+        train_times = data["spikes"]["times"][:].tolist()
+        train_units = data["spikes"]["units"][:].tolist()
+        train_labels = data["labels"][:].tolist()
+        keys = data["extra"]["keys"][:].tolist()
+
+    with h5py.File("/home/pedro/neuron_pizzo_jax-main/shd_test.h5") as data:
+        test_times = data["spikes"]["times"][:].tolist()
+        test_units = data["spikes"]["units"][:].tolist()
+        test_labels = data["labels"][:].tolist()
+        return (
+            train_times,
+            train_units,
+            train_labels,
+            keys,
+            test_times,
+            test_units,
+            test_labels,
+        )
+
+
+"""
 1. Braille tiene ~4600  entries en trainset, 1080 en test set
 2. dimensiones de cada entry son uniformes, matriz de pixeles de cada
 3. 0 (espacio) (1-26) letras
-'''
+"""
 
 
 def loadBraille(nb_upsample, nb_repetitions):
     file_name = "data_braille_letters_raw"
     with open(file_name, "rb") as infile:
         data_dict = pickle.load(infile)
-    
+
     letter_written = [
         "Space",
         "A",

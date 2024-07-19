@@ -8,8 +8,10 @@ from spyx.axn import tanh
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pizzo_neuron_jax import FeLIF  # noqa: E402
 import time
+
+from pizzo_neuron_jax import FeLIF  # noqa: E402
+
 
 # Network definition
 def network_builder(
@@ -29,18 +31,18 @@ def network_builder(
     P_s,
     spike_fn=tanh(k=10),  # noqa: B008
 ):
-    
+
     felif_step, felif_reset = FeLIF(
-            dt=1e-3,
-            innerStep=1000,
-            A=A,
-            I_dsc=I_dsc,
-            V_thr=V_thr,
-            P_s=P_s,
-            spike_fn=spike_fn,
-            paramsScale=1e12,
-        )
-    
+        dt=1e-3,
+        innerStep=1000,
+        A=A,
+        I_dsc=I_dsc,
+        V_thr=V_thr,
+        P_s=P_s,
+        spike_fn=spike_fn,
+        paramsScale=1e12,
+    )
+
     @jax.jit
     def encoder_step(state, input_):
         enc, input_spk = state
@@ -100,12 +102,13 @@ def network_builder(
         )
         # print(out_rec_felif.shape)
         # print(out_rec.shape)
-    
+
         return out_rec, charge, V_rec, P_Rec, h2, spk_rec, h1
 
     batched_predict = vmap(predict, in_axes=(None, 0))
 
     return batched_predict
+
 
 def network_builder_FELIF(
     # Network params
@@ -124,18 +127,18 @@ def network_builder_FELIF(
     P_s,
     spike_fn=tanh(k=10),  # noqa: B008
 ):
-    
+
     felif_step, felif_reset = FeLIF(
-            dt=1e-3,
-            innerStep=1000,
-            A=A,
-            I_dsc=I_dsc,
-            V_thr=V_thr,
-            P_s=P_s,
-            spike_fn=spike_fn,
-            paramsScale=1e12,
-        )
-    
+        dt=1e-3,
+        innerStep=1000,
+        A=A,
+        I_dsc=I_dsc,
+        V_thr=V_thr,
+        P_s=P_s,
+        spike_fn=spike_fn,
+        paramsScale=1e12,
+    )
+
     @jax.jit
     def encoder_step(state, input_):
         enc, input_spk = state
@@ -195,7 +198,7 @@ def network_builder_FELIF(
         )
         # print(out_rec_felif.shape)
         # print(out_rec.shape)
-    
+
         return out_rec, charge, V_rec, P_Rec, h2, spk_rec, h1
 
     batched_predict = vmap(predict, in_axes=(None, 0))
