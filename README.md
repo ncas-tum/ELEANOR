@@ -7,8 +7,8 @@ ELEANOR is a Ferroelectric Leakage-Integrate and Fire (FeLIF) neuron simulator i
 ## Examples
 | Example | Colab link |
 |---------|------------|
-| Implementation of FeLIF neuron using the residual gradient method. | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)]() |
-| Example FeLIF on audio recognition. | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)]() |
+| Optimization of a single FeLIF neuron. | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/bics-rug/neuron_pizzo_jax/blob/main/docs/source/examples/train.ipynb) |
+| Example FeLIF on audio recognition. | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/bics-rug/neuron_pizzo_jax/blob/main/docs/source/examples/shd.ipynb) |
 
 ## Documentation
 
