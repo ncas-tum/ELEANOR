@@ -44,6 +44,7 @@ todo_include_todos = False
 html_theme = "sphinx_book_theme"
 html_show_sourcelink = True
 html_sourcelink_suffix = ""
+html_logo = "_static/img/eleanor.jpg"
 
 html_theme_options = {
     "repository_url": "https://github.com/bics-rug/neuron_pizzo_jax",

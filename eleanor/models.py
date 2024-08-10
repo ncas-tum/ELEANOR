@@ -1,16 +1,53 @@
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+from jaxtyping import Array, PRNGKeyArray
 from spyx.axn import arctan
 
 _spike_fn = arctan(k=2)
 
 
 class FeLIF(eqx.Module):
+    """
+    FeLIF neuron model
+
+    .. math::
+            \\dot{V} = \\frac{I_{\\rm in} - I_{\\rm leak} - \\dot{P}}{C} \\\\
+            \\dot{P} = \\frac{sign(E)P_s - P}{\\tau(E)} \\\\
+            \\tau(E) = \\tau_0 e^{\\left(\\frac{E_a}{|E| + 5e-6}\\right)^\\alpha}
+
+    * :math:`I_{\\rm in}` - Input current
+    * :math:`I_{\\rm leak}` - Leakage current
+    * :math:`V` - Membrane potential
+    * :math:`P` - Polarization
+
+    Example::
+
+        import jax
+        import jax.numpy as jnp
+        import equinox as eqx
+        from eleanor.models import FeLIF
+
+        # Define Network
+        class Network(eqx.Module):
+            layer1: FeLIF
+            linear1: eqx.nn.Linear
+
+            def __init__(self, in_size, out_size, alpha, beta, *, key):
+                self.layer1 = FeLIF(out_size, dt=1e-3, stepFull=False)
+                self.linear1 = eqx.nn.Linear(in_size, out_size, use_bias=False, key=key)
+
+            def __call__(self, input_):
+                x = jax.vmap(self.linear1)(input_ * 1000)
+                s, charge, v, p = self.layer1(x)
+
+                return s, (charge, v, p)
+    """
+
     out_size: int = eqx.field(static=True)
-    P_s: float = eqx.field(static=True)  # max polarisation
+    P_s: float = eqx.field(static=True)
     A: float = eqx.field(static=True)
     C_tot: float = eqx.field(static=True)
     threshold: float = eqx.field(static=True)
@@ -38,13 +75,35 @@ class FeLIF(eqx.Module):
         I_dsc=10e-12,  # discharge current, set the "dendritic time constant"
         V_thr=2.5,
         dt=1e-3,  # 1us timestep resolution
-        innerStep=1000,
-        paramsScale=1e12,  # Scale parameters to avoid underflow
+        paramsScale=1e12,  # Scale parameters to avoid under/overflow
         spike_fn=_spike_fn,
         stepFull=False,
-        *,
-        key=None,
     ):
+        """**Arguments:**
+
+        - `out_size`: The output size. The output from the layer will be a vector
+            of shape `(out_features,)`.
+        - `A`: The device area.
+        - `t_hzo`: The thikness of the ferroelectric.
+        - `t_int`: The thikness of the interlayer.
+        - `eps_hzo`: The ferroelectric dielectric constant.
+        - `eps_int`: The interlayer dielectric constant.
+        - `E_a`: The coercitive field.
+        - `P_s`: The maximum polarisation.
+        - `tau_0`: A multiplicative factor for switching time constant.
+        - `I_0`: A multiplicative factor for leakage current.
+        - `V_t`: A normalization factor for the voltage in the leakage current.
+        - `C_par`: The parasitic capacitance form the circuit.
+        - `alpha`: Tau exponential fitting constant.
+        - `soft_E`: A soft boudary for the electric field, avoids tau to diverge.
+        - `I_dsc`: The discharge current for the voltage leakage, set the "dendritic time constant"r.
+        - `V_thr`: Voltage threshold for the neuron to fire.
+        - `dt`: Simulation timeconstant.
+        - `paramsScale`: Scale parameters to avoid under/overflow.
+        - `spike_fn`: Surrogate gradient spiking fuction.
+        - `stepFull`: .
+
+        """
         _eps0 = 8.85418792394420013968e-12 * paramsScale
         self.out_size = out_size
 
@@ -65,7 +124,6 @@ class FeLIF(eqx.Module):
         I_dsc = I_dsc * paramsScale
         V_thr = V_thr
         dt = dt
-        innerStep = innerStep
         paramsScale = paramsScale
 
         C_0 = _eps0 * eps_hzo / t_hzo * A
@@ -109,7 +167,7 @@ class FeLIF(eqx.Module):
         def updatePol(v, p):
 
             def pol_step(state, input_):
-                p, _ = state
+                p, I_p = state
                 E = v * cap_divider - p * depol_divider
 
                 tau = tau_0 * jnp.exp((E_a / (jnp.abs(E) + 5e-6)) ** alpha)
@@ -117,7 +175,7 @@ class FeLIF(eqx.Module):
                 I_p_new = (jnp.sign(E) * P_s - p) * A / tau
                 dp = I_p_new / A
                 p = jnp.clip(p + 1e-3 * dt * dp, -P_s, P_s)
-                return (p, I_p_new), None
+                return (p, I_p + I_p_new), None
 
             def pol_step2(p):
                 E = v * cap_divider - p * depol_divider
@@ -132,7 +190,7 @@ class FeLIF(eqx.Module):
             (p_inner, I_p_inner), _ = jax.lax.scan(
                 pol_step, (p, jnp.zeros_like(p)), jnp.arange(1000)
             )
-            # I_p_inner = I_p_inner / 1000
+            I_p_inner = I_p_inner / 1000
 
             p_outer, I_p_outer = pol_step2(p)
 
@@ -196,13 +254,24 @@ class FeLIF(eqx.Module):
     def getCharge(self, v, p):
         return v * self.C_tot + p * self.A
 
-    @jax.named_scope("nn.FeLIF")
-    def __call__(self, input_):
+    @jax.named_scope("eleanor.model.FeLIF")
+    def __call__(self, x: Array, *, key: Optional[PRNGKeyArray] = None) -> Array:
+        """**Arguments:**
+
+        - `x`: The input. Should be a JAX array of shape `(T,out_size)`. Where T is time dimension.
+        - `key`: Ignored; provided for compatibility with the rest of the Equinox API.
+            (Keyword only argument.)
+
+        **Returns:**
+
+        A JAX array of shape `(T,out_size)`.
+        """
+
         v0 = jnp.zeros((self.out_size,))
         p0 = jnp.zeros((self.out_size,)) - self.P_s
 
         state = (v0, p0)
-        _, out = jax.lax.scan(self.step, state, input_)
+        _, out = jax.lax.scan(self.step, state, x)
         v, p, s = out
 
         return s, self.getCharge(v, p), v, p

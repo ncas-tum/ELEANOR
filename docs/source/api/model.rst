@@ -1,9 +1,8 @@
 model
 =====
 
-.. automodule:: eleanor.models
-    :members:
-    :show-inheritance:
+.. autoclass:: eleanor.models.FeLIF
+   :members: __init__, __call__
 
 .. toctree::
    :maxdepth: 2
