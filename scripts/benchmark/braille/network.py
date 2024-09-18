@@ -8,7 +8,7 @@ from spyx.axn import tanh
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pizzo_neuron_jax import FeLIF  # noqa: E402
+from scripts.pizzo_neuron_jax import FeLIF  # noqa: E402
 
 
 # Network definition

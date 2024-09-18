@@ -1,8 +1,8 @@
 import pickle
 
 import jax
-import jax.numpy as jnp
 import numpy as np
+import jax.numpy as jnp
 
 
 def shuffle(dataset, shuffle_rng, batch_size):
@@ -19,12 +19,20 @@ def shuffle(dataset, shuffle_rng, batch_size):
     return (obs, labels)
 
 
-def loadNMNIST():
-    pass
-
-
 def loadBraille(nb_upsample, nb_repetitions):
-    file_name = "/home/p306945/data/reading_braille_data/data/data_braille_letters_raw"
+    from io import BytesIO
+    from pathlib import Path
+    from zipfile import ZipFile
+    from urllib.request import urlopen
+
+    file_name = Path("./data/braille/data/data_braille_letters_raw")
+    if not file_name.exists():
+        resp = urlopen(
+            "https://zenodo.org/records/6556273/files/reading_braille_data.zip"
+        )
+        with ZipFile(BytesIO(resp.read())) as zObject:
+            zObject.extract("data/data_braille_letters_raw", path="./data/braille")
+
     with open(file_name, "rb") as infile:
         data_dict = pickle.load(infile)
 

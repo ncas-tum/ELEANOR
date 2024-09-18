@@ -28,7 +28,3 @@ Getting started
    getting_started/getting-start
    examples/examples
    api/api.rst
-
-.. toctree::
-   :maxdepth: 2
-   :caption: Contents:

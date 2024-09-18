@@ -1,17 +1,17 @@
 import argparse
 
 import jax
-import jax.numpy as jnp
-import matplotlib.pyplot as plt
 import nni
 import numpy as np
 import optax
 import seaborn as sns
-from dataset import loadBraille, shuffle
+import jax.numpy as jnp
+import matplotlib.pyplot as plt
+from tqdm import trange
+from dataset import shuffle, loadBraille
 from network import network_builder
 from sklearn import metrics as skmetrics
 from spyx.axn import tanh
-from tqdm import trange
 
 # plt.style.use("dark_background")
 

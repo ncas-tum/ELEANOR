@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "ELEANOR"
+name = "eleanor"
 dynamic = ["version"]
 dependencies = [
   "jax[cuda12]",
@@ -16,14 +16,9 @@ dependencies = [
   "ipywidgets",
   "orbax-checkpoint",
   "aqtp",
-  "spyx",
-  "tonic",
-  "torch",
-  "torchvision",
-  "torchaudio",
-  "equinox",
+  "snnax",
 ]
-requires-python = ">= 3.8"
+requires-python = ">= 3.10"
 authors = [
   {name = "Fernando M. Quintana", email = "f.m.quintana.velazquez@rug.nl"},
   {name = "Luca Fehlings", email = "l.d.fehlings@rug.nl"},
@@ -51,7 +46,6 @@ classifiers = [
 [project.optional-dependencies]
 dev = [
   "pre-commit",
-  "black",
   "black[jupyter]",
   "isort",
   "flake8-black",
