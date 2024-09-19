@@ -1,14 +1,9 @@
-from typing import Union, Callable, Optional, Sequence
+from typing import Tuple, Union, Callable, Optional, Sequence
 
 import jax
 import jax.numpy as jnp
 from chex import Array, PRNGKey
-from snnax.snn.layers.stateful import (
-    StateShape,
-    StatefulLayer,
-    StatefulOutput,
-    default_init_fn,
-)
+from snnax.snn.layers.stateful import StateShape, StatefulLayer, default_init_fn
 from snnax.functional.surrogate import SpikeFn, superspike_surrogate
 
 _spike_fn = superspike_surrogate(10.0)
@@ -16,30 +11,47 @@ _spike_fn = superspike_surrogate(10.0)
 
 class FeLIF(StatefulLayer):
     """
-    Implementation of FeLIF neuron model
+    Implementation of FeLIF neuron model [1]_
 
-    Arguments:
-        `A` (float): Device area
-        `t_hzo` (float): Thikness ferroelectric
-        `t_int` (float): Thikness interlayer
-        `eps_hzo` (float): Ferroelectric dielectric constant
-        `eps_int` (float): Interlayer dielectric constant
-        `E_a` (float): Coercitive field
-        `P_s` (float): Max polarisation
-        `tau_0` (float): Multiplicative factor for switching time constant
-        `I_0` (float): Multiplicative factor for leakage current
-        `V_t` (float): Normalization factor for voltage in leakage current
-        `C_par` (float): Parasitic capacitance form the circuit
-        `alpha` (float): To fit tau exponential
-        `soft_E` (float): Soft boudary for the electric field, avoid tau to diverge
-        `I_dsc` (float): Discharge current, set the "dendritic time constant"
-        `V_thr` (float): Spiking threshold
-        `dt` (float): Time resolution
-        `paramsScale` (float): Scale parameters to avoid underflow
-        `spike_fn` (Array): Spike threshold function with custom surrogate gradient.
-        `init_fn` (Callable): FUnction to initialize the initial state of the spiking neurons. Defaults to initialization with zeros if nothing else if provided.
-        `shape` (StateShape): if given, the parameters will be expanded into vectors and initialized accordingly
-        `key` (PRNGKey): used to initialize the parameters when shape is not None
+    .. math::
+
+        \\frac{dP}{dt} = \\frac{sign(E) P_s - P}{\\tau(E)} \\\\
+        \\frac{dV}{dt} = \\frac{I_{in} - \\frac{dP}{dt}}{C_0} \\\\
+        \\tau(E) = \\tau_0 exp(\\frac{E_a}{|E|})
+
+    .. [1] P. Gibertini, L. Fehlings, T. Mikolajick, E. Chicca, D. Kappel and E. Covi, "Coincidence Detection with an Analog Spiking Neuron Exploiting Ferroelectric Polarization," 2024 IEEE International Symposium on Circuits and Systems (ISCAS), Singapore, Singapore, 2024, pp. 1-5, doi: 10.1109/ISCAS58744.2024.10558196.
+
+    Attributes
+    ----------
+    spike_fn
+    A: float
+        Device area
+    E_a : float
+            Coercitive field
+    P_s : float
+        Max polarisation
+    tau_0 : float
+        Multiplicative factor for switching time constant
+    I_0 : float
+        Multiplicative factor for leakage current
+    V_t : float
+        Normalization factor for voltage in leakage current
+    C_tot : float
+        Total capacitance from the circuit
+    alpha : float
+        To fit tau exponential
+    soft_E : float
+        Soft boudary for the electric field, avoid tau to diverge
+    I_dsc : float
+        Discharge current, set the "dendritic time constant"
+    V_thr : float
+        Spiking threshold
+    dt : float
+        Time resolution
+    cap_divider : float
+        Capacitor constant divider
+    depol_divider : float
+        Polarization constant divider
     """
 
     A: float
@@ -52,37 +64,83 @@ class FeLIF(StatefulLayer):
     alpha: float
     soft_E: float
     I_dsc: float
-    dt: float
     V_thr: float
+    dt: float
     cap_divider: float
     depol_divider: float
     spike_fn: SpikeFn
 
     def __init__(
         self,
-        A=25e-12,  # device area
-        t_hzo=10e-9,  # thikness ferroelectric
-        t_int=1.375e-9,  # thikness interlayer
-        eps_hzo=25.2,  # ferroelectric dielectric constant
-        eps_int=33,  # interlayer dielectric constant
-        E_a=12.7e8,  # coercitive field
-        P_s=22e-2,  # max polarisation
-        tau_0=1e-13,  # multiplicative factor for switching time constant
-        I_0=1e-4,  # mult factor for leakage current
-        V_t=0.32,  # normalization factor for voltage in leakage current
-        C_par=15e-15,  # parasitic capacitance form the circuit
-        alpha=1.3,  # to fit tau exponential
-        soft_E=5e6,  # soft boudary for the electric field, avoid tau to diverge
-        I_dsc=10e-12,  # discharge current, set the "dendritic time constant"
-        V_thr=2.5,
-        dt=1e-3,  # 1us timestep resolution
-        paramsScale=1e12,  # Scale parameters to avoid underflow
+        A: float = 25e-12,
+        t_hzo: float = 10e-9,
+        t_int: float = 1.375e-9,
+        eps_hzo: float = 25.2,
+        eps_int: float = 33,
+        E_a: float = 12.7e8,
+        P_s: float = 22e-2,
+        tau_0: float = 1e-13,
+        I_0: float = 1e-4,
+        V_t: float = 0.32,
+        C_par: float = 15e-15,
+        alpha: float = 1.3,
+        soft_E: float = 5e6,
+        I_dsc: float = 10e-12,
+        V_thr: float = 2.5,
+        dt: float = 1e-3,
+        paramsScale: float = 1e12,
         spike_fn: SpikeFn = _spike_fn,
         init_fn: Optional[Callable] = default_init_fn,
         shape: Optional[StateShape] = None,
         key: Optional[PRNGKey] = None,
         **kwargs,
     ) -> None:
+        """
+        Parameters
+        ---------
+        A : float
+            Device area
+        t_hzo : float
+            Thikness ferroelectric
+        t_int : float
+            Thikness interlayer
+        eps_hzo : float
+            Ferroelectric dielectric constant
+        eps_int : float
+            Interlayer dielectric constant
+        E_a : float
+            Coercitive field
+        P_s : float
+            Max polarisation
+        tau_0 : float
+            Multiplicative factor for switching time constant
+        I_0 : float
+            Multiplicative factor for leakage current
+        V_t : float
+            Normalization factor for voltage in leakage current
+        C_par : float
+            Parasitic capacitance from the circuit
+        alpha : float
+            To fit tau exponential
+        soft_E : float
+            Soft boudary for the electric field, avoid tau to diverge
+        I_dsc : float
+            Discharge current, set the "dendritic time constant"
+        V_thr : float
+            Spiking threshold
+        dt : float
+            Time resolution
+        paramsScale : float
+            Scale parameters to avoid underflow
+        spike_fn : SpikeFn
+            Spike threshold function with custom surrogate gradient.
+        init_fn : Callable
+            FUnction to initialize the initial state of the spiking neurons. Defaults to initialization with zeros if nothing else if provided.
+        shape : StateShape
+            if given, the parameters will be expanded into vectors and initialized accordingly
+        key : PRNGKey
+            used to initialize the parameters when shape is not None
+        """
         super().__init__(init_fn, shape)
         self.spike_fn = spike_fn
 
@@ -134,7 +192,7 @@ class FeLIF(StatefulLayer):
 
     def __call__(
         self, state: Array, synaptic_input: Array, *, key: Optional[PRNGKey] = None
-    ) -> StatefulOutput:
+    ) -> Tuple[Sequence[Array], Sequence[Array]]:
 
         def updatePol(v, p):
 
@@ -211,7 +269,8 @@ class FeLIF(StatefulLayer):
         I_leak = (self.I_0 * self.A * jnp.expm1(v / self.V_t) + self.I_dsc) * jnp.sign(
             v
         )
-        dv = (synaptic_input - I_leak - I_p) / self.C_tot
+        # Multiply by 1000 to convert to current.
+        dv = (synaptic_input * 1000 - I_leak - I_p) / self.C_tot
 
         v_upper = jnp.clip(v + self.dt * dv, -5, 5)
 
