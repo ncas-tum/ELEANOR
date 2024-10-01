@@ -1,12 +1,30 @@
 from typing import Tuple, Union, Callable, Optional, Sequence
 
 import jax
+import equinox as eqx
 import jax.numpy as jnp
 from chex import Array, PRNGKey
 from snnax.snn.layers.stateful import StateShape, StatefulLayer, default_init_fn
 from snnax.functional.surrogate import SpikeFn, superspike_surrogate
 
 _spike_fn = superspike_surrogate(10.0)
+
+
+class Scaler(eqx.Module):
+    """
+    Simple module to scale the output of a layer.
+
+    Attributes
+    ----------
+    scale: float
+        Multiplicative factor of the input.
+    """
+
+    def __init__(self, scale: float) -> None:
+        self.scale = scale
+
+    def __call__(self, x: Array, *, key: Optional[PRNGKey] = None) -> Array:
+        return x * self.scale
 
 
 class FeLIF(StatefulLayer):
@@ -19,11 +37,10 @@ class FeLIF(StatefulLayer):
         \\frac{dV}{dt} = \\frac{I_{in} - \\frac{dP}{dt}}{C_0} \\\\
         \\tau(E) = \\tau_0 exp(\\frac{E_a}{|E|})
 
-    .. [1] P. Gibertini, L. Fehlings, T. Mikolajick, E. Chicca, D. Kappel and E. Covi, "Coincidence Detection with an Analog Spiking Neuron Exploiting Ferroelectric Polarization," 2024 IEEE International Symposium on Circuits and Systems (ISCAS), Singapore, Singapore, 2024, pp. 1-5, doi: 10.1109/ISCAS58744.2024.10558196.
+    .. [1] P. Gibertini, L. Fehlings, T. Mikolajick, E. Chicca, D. Kappel and E. Covi, "Coincidence Detection with an Analog Spiking Neuron Exploiting Ferroelectric Polarization," 2024 IEEE International Symposium on Circuits and Systems (ISCAS), Singapore, Singapore, 2024, pp. 1-5, doi: 10.1109/ISCAS58744.2024.10558196. # noqa B950
 
     Attributes
     ----------
-    spike_fn
     A: float
         Device area
     E_a : float
@@ -52,6 +69,8 @@ class FeLIF(StatefulLayer):
         Capacitor constant divider
     depol_divider : float
         Polarization constant divider
+    spike_fn : SpikeFn
+        Spike threshold function with custom surrogate gradient.
     """
 
     A: float
@@ -135,9 +154,11 @@ class FeLIF(StatefulLayer):
         spike_fn : SpikeFn
             Spike threshold function with custom surrogate gradient.
         init_fn : Callable
-            FUnction to initialize the initial state of the spiking neurons. Defaults to initialization with zeros if nothing else if provided.
+            Function to initialize the initial state of the spiking neurons.
+            Defaults to initialization with zeros if nothing else if provided.
         shape : StateShape
-            if given, the parameters will be expanded into vectors and initialized accordingly
+            if given, the parameters will be expanded into vectors and
+            initialized accordingly
         key : PRNGKey
             used to initialize the parameters when shape is not None
         """
@@ -281,3 +302,233 @@ class FeLIF(StatefulLayer):
         spikes = self.spike_fn(v - self.V_thr)
         state = [v_new, p_new, spikes]
         return [state, [spikes, v_new, p_new]]
+
+
+class Heracles(StatefulLayer):
+    """
+    Implementation of Heracles neural model [2]_
+
+    .. [2] (https://github.com/bics-rug/heracles)
+    """
+
+    A: float
+    t_fe: float
+    eps_fe: float
+    eps_depl: float
+    q_fix_depl: float
+    n_depl: float
+    e_off: float
+    temp: float
+    w_b: float
+    d_e: float
+    P_s: float
+    I_0: float
+    V_t: float
+    C_par: float
+    C_fe: float
+    C_tot_init: float
+    I_dsc: float
+    V_thr: float
+    dt: float
+    _eps0: float
+    _q: float
+    _k: float
+    _h: float
+    spike_fn: SpikeFn
+
+    def __init__(
+        self,
+        A: float = 25e-12,
+        t_fe: float = 9.8e-9,
+        eps_fe: float = 70,
+        eps_depl: float = 3.6,
+        q_fix_depl: float = 945e-4,
+        n_depl: float = 1.4e28,
+        e_off: float = 2e7,
+        temp: float = 294,
+        w_b: float = 1.05,
+        d_e: float = 7.5e-9,
+        P_s: float = 27e-2,
+        I_0: float = 1e-4,
+        V_t: float = 0.32,
+        C_par: float = 15e-15,
+        I_dsc: float = 10e-12,
+        V_thr: float = 3.5,
+        dt: float = 1e-3,
+        paramsScale: float = 1e12,
+        spike_fn: SpikeFn = _spike_fn,
+        init_fn: Optional[Callable] = default_init_fn,
+        shape: Optional[StateShape] = None,
+        key: Optional[PRNGKey] = None,
+        **kwargs,
+    ) -> None:
+        """
+        Parameters
+        ---------
+        A : float
+            Device area
+        t_fe : float
+            Thikness ferroelectric
+        eps_fe : float
+            Ferroelectric dielectric constant
+        eps_depl : float
+            Interlayer dielectric constant
+        q_fix_depl : float
+
+        n_depl : float
+
+        e_off : float
+
+        temp : float
+
+        w_b : float
+
+        d_e : float
+
+        P_s : float
+            Max polarisation
+        I_0 : float
+            Multiplicative factor for leakage current
+        V_t : float
+            Normalization factor for voltage in leakage current
+        C_par : float
+            Parasitic capacitance from the circuit
+        I_dsc : float
+            Discharge current, set the "dendritic time constant"
+        V_thr : float
+            Spiking threshold
+        dt : float
+            Time resolution
+        paramsScale : float
+            Scale parameters to avoid underflow
+        spike_fn : SpikeFn
+            Spike threshold function with custom surrogate gradient.
+        init_fn : Callable
+            Function to initialize the initial state of the spiking neurons.
+            Defaults to initialization with zeros if nothing else if provided.
+        shape : StateShape
+            if given, the parameters will be expanded into vectors and
+            initialized accordingly
+        key : PRNGKey
+            used to initialize the parameters when shape is not None
+        """
+        super().__init__(init_fn, shape)
+        self.spike_fn = spike_fn
+
+        A = A * paramsScale
+        t_fe = t_fe * paramsScale
+        C_par = C_par * paramsScale
+        q_fix_depl = q_fix_depl * paramsScale
+        e_off = e_off / paramsScale
+        d_e = d_e * paramsScale
+        I_dsc = I_dsc * paramsScale
+        n_depl = n_depl / paramsScale
+
+        _eps0 = 8.85418792394420013968e-12 * paramsScale
+        _q = 1.60217663e-19 * paramsScale
+        _k = 1.380649e-23 * paramsScale
+        _h = 6.62607015e-34 * paramsScale
+
+        # Initial values, to be checked whether sensible
+        e_dummy = 0
+        prob = 0
+
+        C_fe = _eps0 * eps_fe / t_fe * A
+        w_depl_d = (_eps0 * eps_fe * e_dummy + q_fix_depl) / _q / n_depl
+        w_depl_u = jnp.abs((_eps0 * eps_fe * e_dummy - q_fix_depl) / _q / n_depl)
+        w_depl = w_depl_d * w_depl_u / (prob * w_depl_u + (1 - prob) * w_depl_d)
+        C_tot_init = 1 / (1 / (C_fe + C_par) + 1 / (_eps0 * eps_depl / w_depl * A))
+
+        # Save parameters in object
+        self.A = A
+        self.t_fe = t_fe
+        self.eps_fe = eps_fe
+        self.eps_depl = eps_depl
+        self.q_fix_depl = q_fix_depl
+        self.n_depl = n_depl
+        self.e_off = e_off
+        self.temp = temp
+        self.w_b = w_b
+        self.d_e = d_e
+        self.P_s = P_s
+        self.I_0 = I_0
+        self.V_t = V_t
+        self.C_par = C_par
+        self.C_fe = C_fe
+        self.C_tot_init = C_tot_init
+        self.I_dsc = I_dsc
+        self.V_thr = V_thr
+        self.dt = dt
+        self._eps0 = _eps0
+        self._q = _q
+        self._k = _k
+        self._h = _h
+
+    def init_state(
+        self, shape: Union[Sequence[int], int], key: PRNGKey, *args, **kwargs
+    ) -> Sequence[Array]:
+        init_state_vol = self.init_fn(shape, key, *args, **kwargs)
+        init_state_pol = jnp.zeros(shape) - self.P_s
+        init_state_spk = jnp.zeros(shape)
+        return [init_state_vol, init_state_pol, init_state_spk]
+
+    def __call__(
+        self, state: Array, synaptic_input: Array, *, key: Optional[PRNGKey] = None
+    ) -> Tuple[Sequence[Array], Sequence[Array]]:
+
+        v, p, spikes = state
+
+        # HERACLES
+        e_dummy = v / self.t_fe
+        prob = p / 2 / self.P_s + 0.5
+        w_depl_d = (
+            (self._eps0 * self.eps_fe * e_dummy + self.q_fix_depl)
+            / self._q
+            / self.n_depl
+        )
+        w_depl_u = jnp.abs(
+            (self._eps0 * self.eps_fe * e_dummy - self.q_fix_depl)
+            / self._q
+            / self.n_depl
+        )
+        w_depl = w_depl_d * w_depl_u / (prob * w_depl_u + (1 - prob) * w_depl_d)
+        C_tot = 1 / (
+            1 / (self.C_fe + self.C_par)
+            + 1 / (self._eps0 * self.eps_depl / w_depl * self.A)
+        )
+        # C_tot = 1/ (1/(C_fe + C_par))
+        cap_divider = self.eps_depl / (self.t_fe * self.eps_depl + w_depl * self.eps_fe)
+        depol_divider = (
+            1 / self._eps0 * w_depl / (self.t_fe * self.eps_depl + w_depl * self.eps_fe)
+        )
+
+        E = v * cap_divider - p * depol_divider
+        w_e = (E - self.e_off) * self.d_e
+        k_plus = (
+            self._k
+            * self.temp
+            / self._h
+            * jnp.exp(-(self.w_b - w_e) * self._q / self._k / self.temp)
+        )
+        dp = 2 * self.P_s * k_plus * (1 - prob)
+        I_p = dp * self.A
+
+        # FeLIF
+        I_leak = (self.I_0 * self.A * jnp.expm1(v / self.V_t) + self.I_dsc) * jnp.sign(
+            v
+        )
+        dv = (synaptic_input - I_leak - I_p) / C_tot
+
+        v_upper = jnp.clip(v + self.dt * dv, 0, 5)
+        p_upper = jnp.clip(p + self.dt * dp, -self.P_s, self.P_s)
+
+        spikes_ref = jax.lax.stop_gradient(spikes)
+        v_new = (1 - spikes_ref) * v_upper
+        p_new = (1 - spikes_ref) * p_upper - (spikes_ref * self.P_s)
+
+        # Calculate spike
+        threshold = self.V_thr * C_tot + self.P_s * self.A
+        charge = v_new * C_tot + p_new * self.A
+        spikes = self.spike_fn(charge - threshold)
+        state = [v_new, p_new, spikes]
+        return [state, [spikes, v_new, p_new, C_tot]]

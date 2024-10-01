@@ -5,5 +5,5 @@ Examples
    :maxdepth: 2
 
    train
-   precision
+   heracles
    shd
