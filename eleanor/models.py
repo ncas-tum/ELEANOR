@@ -266,7 +266,8 @@ class FeLIF(StatefulLayer):
                 tau = tau_fn(E)
 
                 I_p_new = (
-                    (jnp.sign(E) * self.P_s - p) * self.A / jax.lax.stop_gradient(tau)
+                    (jnp.sign(E) * self.P_s - p) *
+                    self.A / jax.lax.stop_gradient(tau)
                 )
                 dp = I_p_new / self.A
                 p = jnp.clip(p + self.dt * dp, -self.P_s, self.P_s)
@@ -366,39 +367,39 @@ class Heracles(StatefulLayer):
         Parameters
         ---------
         A : float
-            Device area
+            Device area [m²]
         t_fe : float
-            Thikness ferroelectric
+            Ferroelectric layer thickness [m]
         eps_fe : float
-            Ferroelectric dielectric constant
+            Relative permittivity of HZO [1]
         eps_depl : float
-            Interlayer dielectric constant
+            Relative permittivity of the electrode [1]
         q_fix_depl : float
-
+            Fixed charge at depletion/ferrolectric interface [C/m²]
         n_depl : float
-
+            Carrier density in interface depletion region [1/m³]
         e_off : float
-
+            Offset electric field [V/m]
         temp : float
-
+            Device temperature [K]
         w_b : float
-
+            Switching barrier height [eV]
         d_e : float
-
+            Electric field action distance [m]
         P_s : float
-            Max polarisation
+            Saturation polarization [C/m²]
         I_0 : float
-            Multiplicative factor for leakage current
+            Leakage current scalar [A/m²]
         V_t : float
-            Normalization factor for voltage in leakage current
+            Scaling factor for voltage in leakage current [V]
         C_par : float
-            Parasitic capacitance from the circuit
+            Parasitic capacitance from the circuit [F]
         I_dsc : float
-            Discharge current, set the "dendritic time constant"
+            Discharge current, set the "dendritic time constant" [A]
         V_thr : float
-            Spiking threshold
+            Spiking threshold [V]
         dt : float
-            Time resolution
+            Time resolution [s]
         paramsScale : float
             Scale parameters to avoid underflow
         spike_fn : SpikeFn
@@ -435,9 +436,11 @@ class Heracles(StatefulLayer):
 
         C_fe = _eps0 * eps_fe / t_fe * A
         w_depl_d = (_eps0 * eps_fe * e_dummy + q_fix_depl) / _q / n_depl
-        w_depl_u = jnp.abs((_eps0 * eps_fe * e_dummy - q_fix_depl) / _q / n_depl)
+        w_depl_u = jnp.abs(
+            (_eps0 * eps_fe * e_dummy - q_fix_depl) / _q / n_depl)
         w_depl = w_depl_d * w_depl_u / (prob * w_depl_u + (1 - prob) * w_depl_d)
-        C_tot_init = 1 / (1 / (C_fe + C_par) + 1 / (_eps0 * eps_depl / w_depl * A))
+        C_tot_init = 1 / (1 / (C_fe + C_par) + 1 /
+                          (_eps0 * eps_depl / w_depl * A))
 
         # Save parameters in object
         self.A = A
@@ -497,9 +500,11 @@ class Heracles(StatefulLayer):
             + 1 / (self._eps0 * self.eps_depl / w_depl * self.A)
         )
         # C_tot = 1/ (1/(C_fe + C_par))
-        cap_divider = self.eps_depl / (self.t_fe * self.eps_depl + w_depl * self.eps_fe)
+        cap_divider = self.eps_depl / \
+            (self.t_fe * self.eps_depl + w_depl * self.eps_fe)
         depol_divider = (
-            1 / self._eps0 * w_depl / (self.t_fe * self.eps_depl + w_depl * self.eps_fe)
+            1 / self._eps0 * w_depl /
+            (self.t_fe * self.eps_depl + w_depl * self.eps_fe)
         )
 
         E = v * cap_divider - p * depol_divider
