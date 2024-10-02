@@ -20,6 +20,8 @@ class Scaler(eqx.Module):
         Multiplicative factor of the input.
     """
 
+    scale: float
+
     def __init__(self, scale: float) -> None:
         self.scale = scale
 
