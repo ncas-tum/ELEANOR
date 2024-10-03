@@ -368,39 +368,39 @@ class Heracles(StatefulLayer):
         Parameters
         ---------
         A : float
-            Device area
+            Device area [m²]
         t_fe : float
-            Thikness ferroelectric
+            Ferroelectric layer thickness [m]
         eps_fe : float
-            Ferroelectric dielectric constant
+            Relative permittivity of HZO [1]
         eps_depl : float
-            Interlayer dielectric constant
+            Relative permittivity of the electrode [1]
         q_fix_depl : float
-
+            Fixed charge at depletion/ferrolectric interface [C/m²]
         n_depl : float
-
+            Carrier density in interface depletion region [1/m³]
         e_off : float
-
+            Offset electric field [V/m]
         temp : float
-
+            Device temperature [K]
         w_b : float
-
+            Switching barrier height [eV]
         d_e : float
-
+            Electric field action distance [m]
         P_s : float
-            Max polarisation
+            Saturation polarization [C/m²]
         I_0 : float
-            Multiplicative factor for leakage current
+            Leakage current scalar [A/m²]
         V_t : float
-            Normalization factor for voltage in leakage current
+            Scaling factor for voltage in leakage current [V]
         C_par : float
-            Parasitic capacitance from the circuit
+            Parasitic capacitance from the circuit [F]
         I_dsc : float
-            Discharge current, set the "dendritic time constant"
+            Discharge current, set the "dendritic time constant" [A]
         V_thr : float
-            Spiking threshold
+            Spiking threshold [V]
         dt : float
-            Time resolution
+            Time resolution [s]
         paramsScale : float
             Scale parameters to avoid underflow
         spike_fn : SpikeFn
@@ -521,7 +521,7 @@ class Heracles(StatefulLayer):
         )
         dv = (synaptic_input - I_leak - I_p) / C_tot
 
-        v_upper = jnp.clip(v + self.dt * dv, 0, 5)
+        v_upper = jnp.clip(v + self.dt * dv, -5, 5)
         p_upper = jnp.clip(p + self.dt * dp, -self.P_s, self.P_s)
 
         spikes_ref = jax.lax.stop_gradient(spikes)
