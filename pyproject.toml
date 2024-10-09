@@ -16,7 +16,7 @@ dependencies = [
   "ipywidgets",
   "orbax-checkpoint",
   "aqtp",
-  "snnax",
+  "snnax@git+https://github.com/PGI15/snnax.git",
 ]
 requires-python = ">= 3.10"
 authors = [

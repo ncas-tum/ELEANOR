@@ -3,6 +3,7 @@ from typing import Tuple, Union, Callable, Optional, Sequence
 import jax
 import equinox as eqx
 import jax.numpy as jnp
+from jax import custom_jvp
 from chex import Array, PRNGKey
 from snnax.snn.layers.stateful import StateShape, StatefulLayer, default_init_fn
 from snnax.functional.surrogate import SpikeFn, superspike_surrogate
@@ -12,7 +13,7 @@ _spike_fn = superspike_surrogate(10.0)
 
 class Scaler(eqx.Module):
     """
-    Simple module to scale the output of a layer.
+    Simple module to scale the output and gradient of a layer.
 
     Attributes
     ----------
@@ -21,12 +22,25 @@ class Scaler(eqx.Module):
     """
 
     scale: float
+    grad_scale: float
 
-    def __init__(self, scale: float) -> None:
+    def __init__(self, scale: float = 1.0, grad_scale: float = 1.0) -> None:
         self.scale = scale
+        self.grad_scale = grad_scale
 
     def __call__(self, x: Array, *, key: Optional[PRNGKey] = None) -> Array:
-        return x * self.scale
+        @custom_jvp
+        def ste(x):
+            return x * self.scale
+
+        @ste.defjvp
+        def f_jvp(primals, tangents):
+            (x,) = primals
+            (x_dot,) = tangents
+            primal_out = ste(x)
+            return primal_out, x_dot * self.grad_scale
+
+        return ste(x)
 
 
 class FeLIF(StatefulLayer):
@@ -295,7 +309,7 @@ class FeLIF(StatefulLayer):
         # Multiply by 1000 to convert to current.
         dv = (synaptic_input * 1000 - I_leak - I_p) / self.C_tot
 
-        v_upper = jnp.clip(v + self.dt * dv, -5, 5)
+        v_upper = jnp.clip(v + self.dt * dv, 0, 5)
 
         spikes_ref = jax.lax.stop_gradient(spikes)
         v_new = (1 - spikes_ref) * v_upper
@@ -521,7 +535,7 @@ class Heracles(StatefulLayer):
         )
         dv = (synaptic_input - I_leak - I_p) / C_tot
 
-        v_upper = jnp.clip(v + self.dt * dv, -5, 5)
+        v_upper = jnp.clip(v + self.dt * dv, 0, 5)
         p_upper = jnp.clip(p + self.dt * dp, -self.P_s, self.P_s)
 
         spikes_ref = jax.lax.stop_gradient(spikes)
@@ -529,8 +543,8 @@ class Heracles(StatefulLayer):
         p_new = (1 - spikes_ref) * p_upper - (spikes_ref * self.P_s)
 
         # Calculate spike
-        threshold = self.V_thr * C_tot + self.P_s * self.A
-        charge = v_new * C_tot + p_new * self.A
-        spikes = self.spike_fn(charge - threshold)
+        # threshold = self.V_thr * C_tot + self.P_s * self.A
+        # charge = v_new * C_tot + p_new * self.A
+        spikes = self.spike_fn(v_new - self.V_thr)
         state = [v_new, p_new, spikes]
         return [state, [spikes, v_new, p_new, C_tot]]
