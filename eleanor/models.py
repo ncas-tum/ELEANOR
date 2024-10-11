@@ -28,6 +28,7 @@ class Scaler(eqx.Module):
         self.scale = scale
         self.grad_scale = grad_scale
 
+    @jax.named_scope("snnax.models.Scaler")
     def __call__(self, x: Array, *, key: Optional[PRNGKey] = None) -> Array:
         @custom_jvp
         def ste(x):
@@ -119,7 +120,7 @@ class FeLIF(StatefulLayer):
         V_t: float = 0.32,
         C_par: float = 15e-15,
         alpha: float = 1.3,
-        soft_E: float = 5e6,
+        soft_E: float = 5e-6,
         I_dsc: float = 10e-12,
         V_thr: float = 2.5,
         dt: float = 1e-3,
@@ -227,6 +228,7 @@ class FeLIF(StatefulLayer):
         init_state_spk = jnp.zeros(shape)
         return [init_state_vol, init_state_pol, init_state_spk]
 
+    @jax.named_scope("snnax.models.FeLIF")
     def __call__(
         self, state: Array, synaptic_input: Array, *, key: Optional[PRNGKey] = None
     ) -> Tuple[Sequence[Array], Sequence[Array]]:
@@ -236,7 +238,7 @@ class FeLIF(StatefulLayer):
             @jax.custom_vjp
             def tau_fn(E):
                 tau = self.tau_0 * jnp.exp(
-                    (self.E_a / (jnp.abs(E) + 5e-6)) ** self.alpha
+                    (self.E_a / (jnp.abs(E) + self.soft_E)) ** self.alpha
                 )
 
                 return tau
@@ -267,9 +269,10 @@ class FeLIF(StatefulLayer):
                 p, _ = state
                 E = v * self.cap_divider - p * self.depol_divider
 
-                tau = self.tau_0 * jnp.exp(
-                    (self.E_a / (jnp.abs(E) + 5e-6)) ** self.alpha
-                )
+                # tau = self.tau_0 * jnp.exp(
+                #     (self.E_a / (jnp.abs(E) + self.soft_E)) ** self.alpha
+                # )
+                tau = tau_fn(E)
 
                 I_p_new = (jnp.sign(E) * self.P_s - p) * self.A / tau
                 dp = I_p_new / self.A
@@ -306,8 +309,7 @@ class FeLIF(StatefulLayer):
         I_leak = (self.I_0 * self.A * jnp.expm1(v / self.V_t) + self.I_dsc) * jnp.sign(
             v
         )
-        # Multiply by 1000 to convert to current.
-        dv = (synaptic_input * 1000 - I_leak - I_p) / self.C_tot
+        dv = (synaptic_input - I_leak - I_p) / self.C_tot
 
         v_upper = jnp.clip(v + self.dt * dv, 0, 5)
 
@@ -488,6 +490,7 @@ class Heracles(StatefulLayer):
         init_state_spk = jnp.zeros(shape)
         return [init_state_vol, init_state_pol, init_state_spk]
 
+    @jax.named_scope("snnax.models.Heracles")
     def __call__(
         self, state: Array, synaptic_input: Array, *, key: Optional[PRNGKey] = None
     ) -> Tuple[Sequence[Array], Sequence[Array]]:
