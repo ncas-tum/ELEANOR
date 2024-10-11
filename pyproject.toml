@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "eleanor"
 dynamic = ["version"]
 dependencies = [
-  "jax[cuda12]",
+  "jax",
   "matplotlib",
   "seaborn",
   "pandas",
@@ -44,6 +44,12 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
+cuda = [
+  "jax[cuda12]",
+]
+rocm = [
+  "jax@git+https://github.com/ROCm/jax/archive/refs/tags/rocm-jaxlib-v0.4.30.tar.gz"
+]
 dev = [
   "pre-commit",
   "black[jupyter]",
@@ -54,6 +60,9 @@ dev = [
   "sphinx-book-theme",
   "myst_nb",
 ]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.version]
 path = "eleanor/__init__.py"
