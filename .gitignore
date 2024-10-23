@@ -2,6 +2,7 @@ dev
 data
 jupyter_execute
 .vscode
+old
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
