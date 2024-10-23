@@ -3,6 +3,7 @@ FROM nvidia/cuda:12.6.1-cudnn-runtime-ubuntu22.04
 # FROM ghcr.io/nvidia/jax
 
 RUN apt update && apt install -y git python3 python3-pip python-is-python3 nvtop ffmpeg locales locales-all && rm -rf /var/cache/apt/archives /var/lib/apt/lists/*
+RUN pip install -U pip
 
 # Generic python libraries
 RUN pip install matplotlib seaborn pandas tqdm scikit-learn ipykernel ipywidgets

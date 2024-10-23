@@ -22,5 +22,5 @@
 			]
 		}
 	},
-	"postCreateCommand": "pip install -e \".[dev]\""
+	"postCreateCommand": "pip install -e \".[dev,cuda]\""
 }
