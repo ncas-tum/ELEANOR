@@ -599,7 +599,7 @@ class FeLIFV2(StatefulLayer):
 
         spikes_ref = jax.lax.stop_gradient(s)
         v = (1 - spikes_ref) * v - 1.5 * spikes_ref
-        p = (1 - spikes_ref) * p - (spikes_ref * 0.05308533)  # 0.1415546)
+        p = (1 - spikes_ref) * p - (spikes_ref * 0.1415546)  # 0.05308533)
         s = self.spike_fn(v - self.V_thr)
 
         state = [v, p, s]
