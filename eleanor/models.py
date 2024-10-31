@@ -19,14 +19,19 @@ class Scaler(eqx.Module):
     ----------
     scale: float
         Multiplicative factor of the input.
+    grad_scale: float
+        Multiplicative factor of the gradient (default the same as scale).
     """
 
     scale: float
     grad_scale: float
 
-    def __init__(self, scale: float = 1.0, grad_scale: float = 1.0) -> None:
+    def __init__(self, scale: float = 1.0, grad_scale: float = None) -> None:
         self.scale = scale
-        self.grad_scale = grad_scale
+        if grad_scale is None:
+            self.grad_scale = scale
+        else:
+            self.grad_scale = grad_scale
 
     @jax.named_scope("snnax.models.Scaler")
     def __call__(self, x: Array, *, key: Optional[PRNGKey] = None) -> Array:
