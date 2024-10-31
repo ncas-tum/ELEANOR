@@ -106,6 +106,7 @@ class FeLIF(StatefulLayer):
     soft_E: float
     I_dsc: float
     V_thr: float
+    reset_P: float
     dt: float
     cap_divider: float
     depol_divider: float
@@ -128,6 +129,7 @@ class FeLIF(StatefulLayer):
         soft_E: float = 5e-6,
         I_dsc: float = 10e-12,
         V_thr: float = 2.5,
+        reset_P: float = 0.1415546,
         dt: float = 1e-3,
         paramsScale: float = 1e12,
         spike_fn: SpikeFn = _spike_fn,
@@ -169,6 +171,8 @@ class FeLIF(StatefulLayer):
             Discharge current, set the "dendritic time constant"
         V_thr : float
             Spiking threshold
+        reset_P : float
+            Reset polarization value
         dt : float
             Time resolution
         paramsScale : float
@@ -219,17 +223,22 @@ class FeLIF(StatefulLayer):
         C_tot = C_0 + C_par
         self.C_tot = C_tot
 
-        cap_divider = eps_int / (t_hzo * eps_hzo + t_int * eps_int)
+        cap_divider = eps_int / (
+            t_hzo * eps_int + t_int * eps_hzo
+        )  # (t_hzo * eps_hzo + t_int * eps_int)
         self.cap_divider = cap_divider
-        depol_divider = 1 / _eps0 * t_int / (t_hzo * eps_hzo + t_int * eps_int)
+        depol_divider = (
+            1 / _eps0 * t_int / (t_hzo * eps_int + t_int * eps_hzo)
+        )  # (t_hzo * eps_hzo + t_int * eps_int)
         self.depol_divider = depol_divider
+        self.reset_P = reset_P
         self.dt = dt
 
     def init_state(
         self, shape: Union[Sequence[int], int], key: PRNGKey, *args, **kwargs
     ) -> Sequence[Array]:
         init_state_vol = self.init_fn(shape, key, *args, **kwargs)
-        init_state_pol = jnp.zeros(shape) - self.P_s
+        init_state_pol = jnp.zeros(shape) + 0.1478602  # self.P_s
         init_state_spk = jnp.zeros(shape)
         return [init_state_vol, init_state_pol, init_state_spk]
 
@@ -271,18 +280,15 @@ class FeLIF(StatefulLayer):
             tau_fn.defvjp(tau_fn_fwd, tau_fn_bw)
 
             def pol_step(state, _):
-                p, _ = state
+                p, I_p_old = state
                 E = v * self.cap_divider - p * self.depol_divider
 
-                # tau = self.tau_0 * jnp.exp(
-                #     (self.E_a / (jnp.abs(E) + self.soft_E)) ** self.alpha
-                # )
                 tau = tau_fn(E)
 
                 I_p_new = (jnp.sign(E) * self.P_s - p) * self.A / tau
                 dp = I_p_new / self.A
                 p = jnp.clip(p + 1e-3 * self.dt * dp, -self.P_s, self.P_s)
-                return (p, I_p_new), None
+                return (p, I_p_new + I_p_old), None
 
             def pol_step2(p):
                 E = v * self.cap_divider - p * self.depol_divider
@@ -299,6 +305,7 @@ class FeLIF(StatefulLayer):
             (p_inner, I_p_inner), _ = jax.lax.scan(
                 pol_step, (p, jnp.zeros_like(p)), jnp.arange(1000)
             )
+            I_p_inner = I_p_inner / 1000
 
             p_outer, I_p_outer = pol_step2(p)
 
@@ -316,11 +323,15 @@ class FeLIF(StatefulLayer):
         )
         dv = (synaptic_input - I_leak - I_p) / self.C_tot
 
-        v_upper = jnp.clip(v + self.dt * dv, 0, 5)
+        v_upper = jnp.clip(v + self.dt * dv, -5, 5)
 
         spikes_ref = jax.lax.stop_gradient(spikes)
-        v_new = (1 - spikes_ref) * v_upper
-        p_new = (1 - spikes_ref) * p_upper - (spikes_ref * self.P_s)
+        v_new = (1 - spikes_ref) * v_upper - 1.5 * spikes_ref
+        p_new = (1 - spikes_ref) * p_upper - (
+            spikes_ref * self.reset_P
+        )  # 0.1415546)  # self.P_s)
+        # v_new = (1 - spikes_ref) * v_upper
+        # p_new = (1 - spikes_ref) * p_upper - (spikes_ref * self.P_s)
 
         spikes = self.spike_fn(v - self.V_thr)
         state = [v_new, p_new, spikes]
@@ -387,6 +398,7 @@ class FeLIFV2(StatefulLayer):
     dt: float
     cap_divider: float
     depol_divider: float
+    reset_P: float
     spike_fn: SpikeFn
 
     def __init__(
@@ -406,6 +418,7 @@ class FeLIFV2(StatefulLayer):
         soft_E: float = 5e-6,
         I_dsc: float = 10e-12,
         V_thr: float = 2.5,
+        reset_P: float = 0.1478602,
         dt: float = 1e-3,
         paramsScale: float = 1e12,
         spike_fn: SpikeFn = _spike_fn,
@@ -447,6 +460,8 @@ class FeLIFV2(StatefulLayer):
             Discharge current, set the "dendritic time constant"
         V_thr : float
             Spiking threshold
+        reset_P : float
+            Reset polarization value
         dt : float
             Time resolution
         paramsScale : float
@@ -505,13 +520,14 @@ class FeLIFV2(StatefulLayer):
             1 / _eps0 * t_int / (t_hzo * eps_int + t_int * eps_hzo)
         )  # (t_hzo * eps_hzo + t_int * eps_int)
         self.depol_divider = depol_divider
+        self.reset_P = reset_P
         self.dt = dt
 
     def init_state(
         self, shape: Union[Sequence[int], int], key: PRNGKey, *args, **kwargs
     ) -> Sequence[Array]:
         init_state_vol = self.init_fn(shape, key, *args, **kwargs)
-        init_state_pol = jnp.zeros(shape) + 0.1478602  # self.P_s
+        init_state_pol = jnp.zeros(shape) + 0.1478602  # self.reset_P  # self.P_s
         init_state_spk = jnp.zeros(shape)
         return [init_state_vol, init_state_pol, init_state_spk]
 
@@ -604,7 +620,7 @@ class FeLIFV2(StatefulLayer):
 
         spikes_ref = jax.lax.stop_gradient(s)
         v = (1 - spikes_ref) * v - 1.5 * spikes_ref
-        p = (1 - spikes_ref) * p - (spikes_ref * 0.1415546)  # 0.05308533)
+        p = (1 - spikes_ref) * p - (spikes_ref * self.reset_P)  # 0.05308533)
         s = self.spike_fn(v - self.V_thr)
 
         state = [v, p, s]
@@ -827,7 +843,7 @@ class Heracles(StatefulLayer):
         )
         dv = (synaptic_input - I_leak - I_p) / C_tot
 
-        v_upper = jnp.clip(v + self.dt * dv, 0, 5)
+        v_upper = jnp.clip(v + self.dt * dv, -5, 5)
         p_upper = jnp.clip(p + self.dt * dp, -self.P_s, self.P_s)
 
         spikes_ref = jax.lax.stop_gradient(spikes)
