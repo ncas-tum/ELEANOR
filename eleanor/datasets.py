@@ -1,17 +1,24 @@
 import pickle
+from functools import partial
 
 import jax
 import numpy as np
 import jax.numpy as jnp
+from scipy import signal
 
 
+@partial(jax.jit, static_argnums=(2,))
 def shuffle(dataset, shuffle_rng, batch_size):
     x, y = dataset
 
     cutoff = y.shape[0] % batch_size
 
-    obs = jax.random.permutation(shuffle_rng, x, axis=0)[:-cutoff]
-    labels = jax.random.permutation(shuffle_rng, y, axis=0)[:-cutoff]
+    if cutoff > 0:
+        obs = jax.random.permutation(shuffle_rng, x, axis=0)[:-cutoff]
+        labels = jax.random.permutation(shuffle_rng, y, axis=0)[:-cutoff]
+    else:
+        obs = jax.random.permutation(shuffle_rng, x, axis=0)
+        labels = jax.random.permutation(shuffle_rng, y, axis=0)
 
     obs = jnp.reshape(obs, (-1, batch_size) + obs.shape[1:])
     labels = jnp.reshape(labels, (-1, batch_size))  # should make batch size a global
@@ -90,12 +97,20 @@ def loadBraille(nb_upsample, nb_repetitions):
     data = (data - rshp.mean(0)) / (rshp.std(0) + 1e-3)
 
     # Upsample
-    def upsample(data, n=2):
-        shp = data.shape
-        tmp = jnp.tile(data, (1, 1, 1, n))
-        return tmp.reshape((shp[0], n * shp[1], shp[2]))
+    def upsample(data, n):
+        # shp = data.shape
+        # tmp = jnp.tile(data, (1, 1, 1, n))
+        # return tmp.reshape((shp[0], n * shp[1], shp[2]))
 
-    data = upsample(data, n=nb_upsample)
+        # filter_size = [int((data_steps*n)/75), 0]  # found manually
+        data_dummy = signal.resample(data, int(data_steps * n))  # upsample
+        # data_dummy = ndimage.uniform_filter(data_dummy, size=filter_size, mode='nearest')  # smooth
+
+        return data_dummy
+
+    upsampled_data = [upsample(d, nb_upsample) for d in data]
+    data = jnp.stack(upsampled_data)
+    # data = upsample(data, nb_upsample)
 
     data = jax.random.permutation(jax.random.PRNGKey(0), data, axis=0)
     labels = jax.random.permutation(jax.random.PRNGKey(0), labels, axis=0)
