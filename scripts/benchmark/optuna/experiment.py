@@ -9,12 +9,13 @@ import equinox as eqx
 import jax.numpy as jnp
 import snnax.snn as snn
 import jax.random as jrandom
+import optuna.storages.journal
 from chex import Array, PRNGKey
 from tqdm import trange
 
-from eleanor.models import Scaler, Heracles
+from eleanor.models import Heracles
 from eleanor.datasets import shuffle, loadBraille
-from eleanor.quantization import QLinear
+from eleanor.weight_quantization import QuantizedLinear
 
 SEED = 13
 NBEPOCHS = 150
@@ -23,7 +24,6 @@ BATCHSIZE = 128
 
 # Model definition
 class EncodingLayer(eqx.Module):
-
     gain: Array
     bias: Array
     expansion: float
@@ -39,24 +39,26 @@ class EncodingLayer(eqx.Module):
 
 
 def define_model(key, trial):
-    # alpha = 0.5581817206696561#trial.suggest_float("alpha", 0.1, 1.0, log=False)
-    # beta = 0.3920435184318871#trial.suggest_float("beta", 0.1, 1.0, log=False)
+    # encoding_gain = trial.suggest_float("encoding_gain", 0.01, 1.0, log=False)
     alpha = trial.suggest_float("alpha", 0.1, 1.0, log=False)
     beta = trial.suggest_float("beta", 0.1, 1.0, log=False)
-    scaler = trial.suggest_float("scaler", 1.0, 1000.0, log=False)
-    V_thr = trial.suggest_float("V_thr", 0.2, 3.5, log=False)
+    # alpha_o = trial.suggest_float("alpha_o", 0.1, 1.0, log=False)
+    # beta_o = trial.suggest_float("beta_o", 0.1, 1.0, log=False)
+    # scaler = trial.suggest_float("scaler", 1.0, 1000.0, log=False)
+    V_thr = trial.suggest_float("V_thr", 2.5, 3.5, log=False)
+    paramScale = 10 ** trial.suggest_int("paramScale", 5, 12)
 
-    key1, key2, key3, key4, key5 = jrandom.split(key, 5)
+    key1, key2, key3, key4, key5, key6 = jrandom.split(key, 6)
     enc_gain = jax.random.normal(key1, shape=(128,)) * 0.18436009935019085
     enc_bias = jax.random.normal(key2, shape=(128,))
     model = snn.Sequential(
         EncodingLayer(enc_gain, enc_bias, 32),
-        QLinear(128, 256, n_bits=2, key=key3),
+        QuantizedLinear(128, 256, quant_bits=3, key=key3),
         snn.LIF([alpha, beta], key=key4),
-        QLinear(256, 27, n_bits=2, key=key5),
-        # snn.LIF([alpha, beta]),
-        Scaler(scaler),
-        Heracles(dt=1e-3, V_thr=V_thr, paramsScale=1e12),
+        QuantizedLinear(256, 27, quant_bits=3, key=key5),
+        # snn.LIF([alpha_o, beta_o], key=key6),
+        # Scaler(scaler),
+        Heracles(dt=1e-3, V_thr=V_thr, paramsScale=paramScale, key=key6),
     )
     return model
 
@@ -121,7 +123,7 @@ def objective(trial):
     )
 
     key = jrandom.key(SEED)
-    key, kmodel = jrandom.split(key, 2)
+    key, kmodel, kstate = jrandom.split(key, 3)
 
     model = define_model(kmodel, trial)
     optim = optax.adamax(
@@ -129,24 +131,30 @@ def objective(trial):
     )
     opt_state = optim.init(eqx.filter(model, eqx.is_inexact_array))
 
-    initial_state = model.init_state(in_shape=(4,), key=jax.random.key(0))
+    initial_state = model.init_state(in_shape=(4,), key=kstate)
 
     pbar = trange(0, NBEPOCHS)
     for epoch in pbar:
         key, epoch_key, train_key, test_key = jax.random.split(key, 4)
         x_train, y_train = shuffle(trainset, epoch_key, BATCHSIZE)
-        for in_spikes, tgt_class in zip(x_train, y_train):
+        for i, (in_spikes, tgt_class) in enumerate(zip(x_train, y_train)):
             # Initializing the membrane potentials of LIF neurons
             model, opt_state, _ = update(
-                model, optim, initial_state, opt_state, in_spikes, tgt_class, train_key
+                model,
+                optim,
+                initial_state,
+                opt_state,
+                in_spikes,
+                tgt_class,
+                jrandom.fold_in(train_key, i),
             )
 
         x_test, y_test = shuffle(testset, jax.random.key(0), BATCHSIZE)
         accuracy_test = []
-        for in_spikes, tgt_class in zip(x_test, y_test):
+        for i, (in_spikes, tgt_class) in enumerate(zip(x_test, y_test)):
             # Initializing the membrane potentials of LIF neurons
             accuracy = calc_accuracy(
-                model, initial_state, in_spikes, tgt_class, test_key
+                model, initial_state, in_spikes, tgt_class, jrandom.fold_in(test_key, i)
             )
             accuracy_test.append(accuracy)
         accuracy_test = jnp.mean(jnp.asarray(accuracy_test))
@@ -159,10 +167,12 @@ def objective(trial):
 
 
 model = "Heracles"
-quantization = "1.5"
-storage = optuna.storages.JournalStorage(
-    optuna.storages.journal.JournalFileBackend("./experiments_lif.log")
-)
+quantization = "3"
+# storage = optuna.storages.JournalStorage(
+#     optuna.storages.journal.JournalFileBackend("./bruno.log")
+# )
+storage = optuna.storages.RDBStorage("sqlite:///bruno.db")
+
 try:
     restored_sampler = pickle.load(open(f"sampler_{quantization}bit_{model}.pkl", "rb"))
 except FileNotFoundError:

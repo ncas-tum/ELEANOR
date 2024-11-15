@@ -98,13 +98,7 @@ def loadBraille(nb_upsample, nb_repetitions):
 
     # Upsample
     def upsample(data, n):
-        # shp = data.shape
-        # tmp = jnp.tile(data, (1, 1, 1, n))
-        # return tmp.reshape((shp[0], n * shp[1], shp[2]))
-
-        # filter_size = [int((data_steps*n)/75), 0]  # found manually
         data_dummy = signal.resample(data, int(data_steps * n))  # upsample
-        # data_dummy = ndimage.uniform_filter(data_dummy, size=filter_size, mode='nearest')  # smooth
 
         return data_dummy
 
