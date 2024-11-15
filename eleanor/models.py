@@ -246,9 +246,7 @@ class FeLIF(StatefulLayer):
     def __call__(
         self, state: Array, synaptic_input: Array, *, key: Optional[PRNGKey] = None
     ) -> Tuple[Sequence[Array], Sequence[Array]]:
-
         def updatePol(v, p):
-
             @jax.custom_vjp
             def tau_fn(E):
                 tau = self.tau_0 * jnp.exp(
@@ -535,7 +533,6 @@ class FeLIFV2(StatefulLayer):
     def __call__(
         self, state: Array, synaptic_input: Array, *, key: Optional[PRNGKey] = None
     ) -> Tuple[Sequence[Array], Sequence[Array]]:
-
         @jax.custom_vjp
         def tau_fn(E):
             tau = self.tau_0 * jnp.exp(
@@ -799,7 +796,6 @@ class Heracles(StatefulLayer):
     def __call__(
         self, state: Array, synaptic_input: Array, *, key: Optional[PRNGKey] = None
     ) -> Tuple[Sequence[Array], Sequence[Array]]:
-
         v, p, spikes = state
 
         # HERACLES
@@ -828,12 +824,9 @@ class Heracles(StatefulLayer):
 
         E = v * cap_divider - p * depol_divider
         w_e = (E - self.e_off) * self.d_e
-        k_plus = (
-            self._k
-            * self.temp
-            / self._h
-            * jnp.exp(-(self.w_b - w_e) * self._q / self._k / self.temp)
-        )
+        w_exp = jnp.exp(-(self.w_b - w_e) * self._q / self._k / self.temp)
+        w_exp = jnp.clip(w_exp, 0, 3.0e-12)
+        k_plus = self._k * self.temp / self._h * w_exp
         dp = 2 * self.P_s * k_plus * (1 - prob)
         I_p = dp * self.A
 
@@ -843,7 +836,7 @@ class Heracles(StatefulLayer):
         )
         dv = (synaptic_input - I_leak - I_p) / C_tot
 
-        v_upper = jnp.clip(v + self.dt * dv, -5, 5)
+        v_upper = jnp.clip(v + self.dt * dv, -1.5, 3.5)
         p_upper = jnp.clip(p + self.dt * dp, -self.P_s, self.P_s)
 
         spikes_ref = jax.lax.stop_gradient(spikes)
