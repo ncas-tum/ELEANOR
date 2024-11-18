@@ -57,7 +57,7 @@ def define_model(key, trial):
         snn.LIF([alpha, beta], key=key4),
         QuantizedLinear(256, 27, quant_bits=3, key=key5),
         # snn.LIF([alpha_o, beta_o], key=key6),
-        # Scaler(scaler),
+        # FeLIFV2(dt=1e-3, V_thr=V_thr, paramsScale=paramScale, key=key6),
         Heracles(dt=1e-3, V_thr=V_thr, paramsScale=paramScale, key=key6),
     )
     return model
@@ -166,11 +166,19 @@ def objective(trial):
     return accuracy_test
 
 
+class SaveStateCallback:
+
+    def __call__(
+        self, study: optuna.study.Study, trial: optuna.trial.FrozenTrial
+    ) -> None:
+        with open(f"sampler_{quantization}bit_{model}.pkl", "wb") as fout:
+            pickle.dump(study.sampler, fout)
+        with open(f"pruner_{quantization}bit_{model}.pkl", "wb") as fout:
+            pickle.dump(study.pruner, fout)
+
+
 model = "Heracles"
 quantization = "3"
-# storage = optuna.storages.JournalStorage(
-#     optuna.storages.journal.JournalFileBackend("./bruno.log")
-# )
 storage = optuna.storages.RDBStorage("sqlite:///bruno.db")
 
 try:
@@ -191,8 +199,4 @@ study = optuna.create_study(
     pruner=restored_pruner,
     load_if_exists=True,
 )
-study.optimize(objective, n_trials=300)
-with open(f"sampler_{quantization}bit_{model}.pkl", "wb") as fout:
-    pickle.dump(study.sampler, fout)
-with open(f"pruner_{quantization}bit_{model}.pkl", "wb") as fout:
-    pickle.dump(study.pruner, fout)
+study.optimize(objective, n_trials=300, callbacks=[SaveStateCallback()])
