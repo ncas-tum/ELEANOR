@@ -14,7 +14,7 @@ import optuna.storages.journal
 from chex import Array, PRNGKey
 from tqdm import trange
 
-# from eleanor.models import Heracles
+from eleanor.models import Heracles
 from eleanor.datasets import shuffle, loadBraille
 from eleanor.weight_quantization import QuantizedLinear
 
@@ -38,13 +38,30 @@ class EncodingLayer(eqx.Module):
         return output
 
 
-def define_model(key, trial):
+def define_Heracles(key, trial):
+    alpha = trial.params["alpha"]
+    beta = trial.params["beta"]
+    V_thr = trial.params["V_thr"]
+    paramScale = 10 ** trial.params["paramScale"]
+
+    key1, key2, key3, key4, key5, key6 = jrandom.split(key, 6)
+    enc_gain = jax.random.normal(key1, shape=(128,)) * 0.18436009935019085
+    enc_bias = jax.random.normal(key2, shape=(128,))
+    model = snn.Sequential(
+        EncodingLayer(enc_gain, enc_bias, 32),
+        QuantizedLinear(128, 256, quant_bits=3, key=key3),
+        snn.LIF([alpha, beta], key=key4),
+        QuantizedLinear(256, 27, quant_bits=3, key=key5),
+        Heracles(dt=1e-3, V_thr=V_thr, paramsScale=paramScale, key=key6),
+    )
+    return model
+
+
+def define_LIF(key, trial):
     alpha = trial.params["alpha"]
     beta = trial.params["beta"]
     alpha_o = trial.params["alpha_o"]
     beta_o = trial.params["beta_o"]
-    # V_thr = trial.params["V_thr"]
-    # paramScale = 10 ** trial.params["paramScale"]
 
     key1, key2, key3, key4, key5, key6 = jrandom.split(key, 6)
     enc_gain = jax.random.normal(key1, shape=(128,)) * 0.18436009935019085
@@ -55,8 +72,6 @@ def define_model(key, trial):
         snn.LIF([alpha, beta], key=key4),
         QuantizedLinear(256, 27, quant_bits=3, key=key5),
         snn.LIF([alpha_o, beta_o], key=key6),
-        # Scaler(scaler),
-        # Heracles(dt=1e-3, V_thr=V_thr, paramsScale=paramScale, key=key6),
     )
     return model
 
@@ -123,10 +138,8 @@ def run_trial(trial, SEED):
     key = jrandom.key(SEED)
     key, kmodel, kstate = jrandom.split(key, 3)
 
-    model = define_model(kmodel, trial)
-    optim = optax.adamax(
-        learning_rate=trial.suggest_float("lr", 1e-5, 1e-1, log=True), b1=0.9, b2=0.995
-    )
+    model = define_LIF(kmodel, trial)
+    optim = optax.adamax(learning_rate=trial.params["lr"], b1=0.9, b2=0.995)
     opt_state = optim.init(eqx.filter(model, eqx.is_inexact_array))
 
     initial_state = model.init_state(in_shape=(4,), key=kstate)
@@ -164,10 +177,10 @@ def run_trial(trial, SEED):
 
 model_name = "LIF"
 quantization = "3"
-storage = optuna.storages.JournalStorage(
-    optuna.storages.journal.JournalFileBackend("./bruno.log")
-)
-# storage = optuna.storages.RDBStorage("sqlite:///bruno.db")
+# storage = optuna.storages.JournalStorage(
+#     optuna.storages.journal.JournalFileBackend("./bruno.log")
+# )
+storage = optuna.storages.RDBStorage("sqlite:///bruno.db")
 
 try:
     restored_sampler = pickle.load(
