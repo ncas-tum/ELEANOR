@@ -13,7 +13,7 @@ import optuna.storages.journal
 from chex import Array, PRNGKey
 from tqdm import trange
 
-from eleanor.models import Heracles
+from eleanor.models import FeLIFV2
 from eleanor.datasets import shuffle, loadBraille
 from eleanor.weight_quantization import QuantizedLinear
 
@@ -57,8 +57,8 @@ def define_model(key, trial):
         snn.LIF([alpha, beta], key=key4),
         QuantizedLinear(256, 27, quant_bits=3, key=key5),
         # snn.LIF([alpha_o, beta_o], key=key6),
-        # FeLIFV2(dt=1e-3, V_thr=V_thr, paramsScale=paramScale, key=key6),
-        Heracles(dt=1e-3, V_thr=V_thr, paramsScale=paramScale, key=key6),
+        FeLIFV2(dt=1e-3, V_thr=V_thr, paramsScale=paramScale, key=key6),
+        # Heracles(dt=1e-3, V_thr=V_thr, paramsScale=paramScale, key=key6),
     )
     return model
 
@@ -177,26 +177,32 @@ class SaveStateCallback:
             pickle.dump(study.pruner, fout)
 
 
-model = "Heracles"
+model = "FeLIF"
 quantization = "3"
 storage = optuna.storages.RDBStorage("sqlite:///bruno.db")
 
-try:
-    restored_sampler = pickle.load(open(f"sampler_{quantization}bit_{model}.pkl", "rb"))
-except FileNotFoundError:
-    restored_sampler = optuna.samplers.TPESampler(seed=SEED)
+# try:
+#     restored_sampler = pickle.load(open(f"sampler_{quantization}bit_{model}.pkl", "rb"))
+# except FileNotFoundError:
+#     restored_sampler = optuna.samplers.TPESampler(seed=SEED)
 
-try:
-    restored_pruner = pickle.load(open(f"pruner_{quantization}bit_{model}.pkl", "rb"))
-except FileNotFoundError:
-    restored_pruner = optuna.pruners.NopPruner()
+# try:
+#     restored_pruner = pickle.load(open(f"pruner_{quantization}bit_{model}.pkl", "rb"))
+# except FileNotFoundError:
+#     restored_pruner = optuna.pruners.NopPruner()
 
-study = optuna.create_study(
+# study = optuna.create_study(
+#     storage=storage,
+#     study_name=f"{quantization}bit {model}",
+#     direction="maximize",
+#     sampler=restored_sampler,
+#     pruner=restored_pruner,
+#     load_if_exists=True,
+# )
+
+study = optuna.load_study(
     storage=storage,
     study_name=f"{quantization}bit {model}",
-    direction="maximize",
-    sampler=restored_sampler,
-    pruner=restored_pruner,
-    load_if_exists=True,
 )
-study.optimize(objective, n_trials=300, callbacks=[SaveStateCallback()])
+# study.optimize(objective, n_trials=60, callbacks=[SaveStateCallback()])
+study.optimize(objective, n_trials=60)
