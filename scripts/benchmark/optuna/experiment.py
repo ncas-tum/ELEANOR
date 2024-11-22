@@ -106,10 +106,10 @@ class RLIF(snn.LIF):
         alpha = jax.lax.clamp(0.5, self.decay_constants[0], 1.0)
         beta = jax.lax.clamp(0.5, self.decay_constants[1], 1.0)
 
-        mem_pot = alpha * mem_pot + (1.0 - alpha) * (
-            syn_curr + self.recurrent(spike_output, key=key)
+        mem_pot = alpha * mem_pot + (1.0 - alpha) * (syn_curr)
+        syn_curr = beta * syn_curr + (1.0 - beta) * (
+            synaptic_input + self.recurrent(spike_output, key=key)
         )
-        syn_curr = beta * syn_curr + (1.0 - beta) * synaptic_input
 
         spike_output = self.spike_fn(mem_pot - self.threshold)
 

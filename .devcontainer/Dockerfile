@@ -8,7 +8,7 @@ RUN apt update && apt install -y git python3 python3-pip python-is-python3 pytho
 RUN pip install -U pip
 
 # Generic python libraries
-RUN pip install matplotlib seaborn pandas tqdm scikit-learn ipykernel ipywidgets
+RUN pip install matplotlib seaborn pandas tqdm scikit-learn ipykernel ipywidgets optuna optuna-dashboard
 
 # JAX
 RUN pip install equinox git+https://github.com/google/orbax/#subdirectory=checkpoint aqtp

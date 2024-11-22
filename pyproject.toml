@@ -22,6 +22,7 @@ requires-python = ">= 3.10"
 authors = [
   {name = "Fernando M. Quintana", email = "f.m.quintana.velazquez@rug.nl"},
   {name = "Luca Fehlings", email = "l.d.fehlings@rug.nl"},
+  {name = "Martin A. Nicholson", email = "m.a.nicholson@student.rug.nl"},
   {name = "Pedro F. Ortiz Costa", email = "p.f.ortiz.costa@student.rug.nl"},
 ]
 maintainers = [
