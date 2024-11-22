@@ -54,6 +54,7 @@ class RLIF(snn.LIF):
         reset_val: Optional[Array] = None,
         init_fn: Optional[Callable] = default_init_fn,
         shape: Optional[StateShape] = None,
+        use_bias: Optional[bool] = False,
         key: Optional[PRNGKey] = None,
     ) -> None:
 
@@ -70,12 +71,16 @@ class RLIF(snn.LIF):
         )
         if quant_bits == "FP":
             self.recurrent = eqx.nn.Linear(
-                n_features, n_features, use_bias=False, key=krec
+                n_features, n_features, use_bias=use_bias, key=krec
             )
         else:
             quant_bits = int(quant_bits)
             self.recurrent = QuantizedLinear(
-                n_features, n_features, quant_bits=quant_bits, use_bias=False, key=krec
+                n_features,
+                n_features,
+                quant_bits=quant_bits,
+                use_bias=use_bias,
+                key=krec,
             )
 
     def __call__(
@@ -112,7 +117,7 @@ class RLIF(snn.LIF):
         return [state, spike_output]
 
 
-def define_model(key, model_name, quant_bits, trial):
+def define_model(key, model_name, quant_bits, use_bias, trial):
     # encoding_gain = trial.suggest_float("encoding_gain", 0.01, 1.0, log=False)
     alpha = trial.suggest_float("alpha", 0.1, 1.0, log=False)
     beta = trial.suggest_float("beta", 0.1, 1.0, log=False)
@@ -135,7 +140,7 @@ def define_model(key, model_name, quant_bits, trial):
         raise Exception(f"Model {model_name} not found")
 
     if model_name == "RLIF":
-        hiddenLayer = RLIF(256, quant_bits, [alpha, beta], key=key2)
+        hiddenLayer = RLIF(256, quant_bits, [alpha, beta], use_bias=use_bias, key=key2)
     else:
         hiddenLayer = snn.LIF([alpha, beta], key=key2)
 
@@ -145,18 +150,22 @@ def define_model(key, model_name, quant_bits, trial):
     if quant_bits == "FP":
         model = snn.Sequential(
             EncodingLayer(enc_gain, enc_bias, 32),
-            eqx.nn.Linear(128, 256, use_bias=False, key=key1),
+            eqx.nn.Linear(128, 256, use_bias=use_bias, key=key1),
             hiddenLayer,
-            eqx.nn.Linear(256, 27, use_bias=False, key=key3),
+            eqx.nn.Linear(256, 27, use_bias=use_bias, key=key3),
             ouputLayer,
         )
     else:
         quant_bits = int(quant_bits)
         model = snn.Sequential(
             EncodingLayer(enc_gain, enc_bias, 32),
-            QuantizedLinear(128, 256, use_bias=False, quant_bits=quant_bits, key=key1),
+            QuantizedLinear(
+                128, 256, use_bias=use_bias, quant_bits=quant_bits, key=key1
+            ),
             hiddenLayer,
-            QuantizedLinear(256, 27, use_bias=False, quant_bits=quant_bits, key=key3),
+            QuantizedLinear(
+                256, 27, use_bias=use_bias, quant_bits=quant_bits, key=key3
+            ),
             ouputLayer,
         )
     return model
@@ -224,7 +233,7 @@ def update(model, optim, in_states, opt_state, in_spikes, tgt_class, key):
     return model, opt_state, loss
 
 
-def _objective(model_name, quant_bits, trial):
+def _objective(model_name, quant_bits, use_bias, trial):
     trainset, testset, nb_outputs, nb_channels, nb_steps, time_step = loadBraille(
         2, 200
     )
@@ -232,7 +241,7 @@ def _objective(model_name, quant_bits, trial):
     key = jrandom.key(SEED)
     key, kmodel, kstate = jrandom.split(key, 3)
 
-    model = define_model(kmodel, model_name, quant_bits, trial)
+    model = define_model(kmodel, model_name, quant_bits, use_bias, trial)
     print(model)
     optim = optax.adamax(
         learning_rate=trial.suggest_float("lr", 1e-5, 1e-1, log=True), b1=0.9, b2=0.995
@@ -277,6 +286,7 @@ def _objective(model_name, quant_bits, trial):
 parser = argparse.ArgumentParser()
 parser.add_argument("-m", "--model", type=str, required=True)
 parser.add_argument("-q", "--quantization", type=str, required=True)
+parser.add_argument("-b", "--bias", action="store_true")
 
 args = parser.parse_args()
 print(args.model, args.quantization)
@@ -289,11 +299,12 @@ elif args.model == "Heracles" or args.model == "FeLIF":
 else:
     raise Exception(f"Model {args.model} not found")
 
-objective = partial(_objective, args.model, args.quantization)
-storage = optuna.storages.RDBStorage("sqlite:///bruno_results.db")
+objective = partial(_objective, args.model, args.quantization, args.bias)
+storage = optuna.storages.RDBStorage("sqlite:///bruno_bias.db")
 
 study = optuna.load_study(
     storage=storage,
     study_name=f"{args.quantization}bit {args.model}",
+    pruner=optuna.pruners.NopPruner(),
 )
 study.optimize(objective, n_trials=60)
