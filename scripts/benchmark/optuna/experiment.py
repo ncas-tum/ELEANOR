@@ -290,7 +290,6 @@ parser.add_argument("-b", "--bias", action="store_true")
 
 args = parser.parse_args()
 print(args.model, args.quantization)
-print("60 Trials")
 
 if args.model == "LIF" or args.model == "RLIF":
     getOutput = _outputLIF
@@ -300,7 +299,7 @@ else:
     raise Exception(f"Model {args.model} not found")
 
 objective = partial(_objective, args.model, args.quantization, args.bias)
-storage = optuna.storages.RDBStorage("sqlite:///bruno_bias.db")
+storage = optuna.storages.RDBStorage("sqlite:///bruno.db")
 
 study = optuna.load_study(
     storage=storage,
