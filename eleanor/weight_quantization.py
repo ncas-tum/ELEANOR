@@ -1,28 +1,62 @@
 from typing import Union, Literal, Optional
+from functools import partial
 
 import jax
 import equinox as eqx
 import jax.numpy as jnp
+import jax.random as jrand
 from jaxtyping import Array, PRNGKeyArray
 
 
+@partial(jax.jit, static_argnames=("preserve_zero", "preserve_max_val"))
+def get_quant_bound(bits, preserve_zero=False, preserve_max_val=False):
+    def get_edge_of_last_int_bucket():
+        ret = 2.0 ** (bits - 1)
+        if preserve_zero:
+            # Lose one bucket.
+            ret -= 0.5
+        return ret
+
+    def get_center_of_last_int_bucket():
+        return get_edge_of_last_int_bucket() - 0.5
+
+    if preserve_max_val:
+        return get_center_of_last_int_bucket()
+    else:
+        return get_edge_of_last_int_bucket()
+
+
+@partial(
+    jax.jit,
+    static_argnames=("num_bits", "preserve_zero", "preserve_max_val", "stochastic"),
+)
 def quantize_weights(
-    weights: Array, random_key: PRNGKeyArray, num_bits: int = 8
+    weights: Array,
+    random_key: PRNGKeyArray,
+    num_bits: int = 8,
+    preserve_zero: bool = True,
+    preserve_max_val: bool = False,
+    stochastic: bool = True,
 ) -> Array:
     """
-    Quantize weights to a specified bit precision.
+    Quantize weights to a specified bit precision. It can apply
+    stochastic rounding using the weight value as the probability
+    for rounding.
 
     Args:
         weights: The weights to quantize.
-        num_bits: Number of bits for quantization (e.g., 8 for int8).
         random_key: A random key is used to implement stochastic rounding.
+        num_bits: Number of bits for quantization (e.g., 8 for int8).
+        preserve_zero: Preserve zero value in the quantization.
+        preserve_max_val: preserve maximum weight value in the quantization.
+        stochastic: Apply stochastic rounding based on the weight value.
 
     Returns:
         Quantized weights.
     """
 
     # Obtaining the maximum value for the specified number of bits
-    max_val = 2 ** (num_bits - 1) - 1  # e.g., 127 for int8
+    max_val = get_quant_bound(num_bits, preserve_zero, preserve_max_val)
 
     # Calculate absolute max across all elements
     abs_max = jnp.max(jnp.abs(weights), keepdims=True)
@@ -32,10 +66,18 @@ def quantize_weights(
 
     # Scale weights to the range and quantize
     scaled_weights = weights / scale * max_val
-    random_uniform = jax.random.uniform(random_key, shape=weights.shape)
-    quantized_weights = jnp.clip(
-        jnp.round(scaled_weights + random_uniform - 0.5), -max_val, max_val
-    ).astype(jnp.int8)
+
+    if stochastic:
+        w_floor = jnp.floor(scaled_weights)
+        w_ceil = jnp.ceil(scaled_weights)
+
+        prob = scaled_weights - w_floor
+        index = jrand.uniform(random_key, scaled_weights.shape) < prob
+        qval = jnp.where(index, w_ceil, w_floor)
+    else:
+        qval = jnp.round(scaled_weights)
+
+    quantized_weights = jnp.clip(qval, -max_val, max_val).astype(jnp.int8)
 
     return quantized_weights, max_val / scale
 
@@ -44,7 +86,8 @@ class QuantizedLinear(eqx.nn.Linear):
     """Adapted from nn.Linear. Performs a linear transformation,
     and produces quantized weights when called."""
 
-    quant_bits: int = 8  # Specify number of bits for quantization
+    quant_bits: int  # Specify number of bits for quantization
+    stochastic: bool
 
     def __init__(
         self,
@@ -53,6 +96,7 @@ class QuantizedLinear(eqx.nn.Linear):
         use_bias: bool = True,
         dtype=None,
         quant_bits: int = 8,
+        stochastic: bool = True,
         *,
         key: PRNGKeyArray,
     ):
@@ -79,6 +123,7 @@ class QuantizedLinear(eqx.nn.Linear):
             in_features, out_features, use_bias, dtype, key=key
         )
         self.quant_bits = quant_bits
+        self.stochastic = stochastic
 
     @jax.named_scope("eleanor.weight_quantization.QuantizedLinear")
     def __call__(self, x: Array, *, key: Optional[PRNGKeyArray] = None) -> Array:
@@ -113,7 +158,12 @@ class QuantizedLinear(eqx.nn.Linear):
 
         # Quantize weights straight-through estimator
         quantized_weights, scale = quantize_weights(
-            self.weight, key, num_bits=self.quant_bits
+            self.weight,
+            key,
+            num_bits=self.quant_bits,
+            preserve_zero=True,
+            preserve_max_val=False,
+            stochastic=self.stochastic,
         )
 
         # Use the straight-through estimator approach to ensure gradients
