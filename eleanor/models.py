@@ -6,9 +6,10 @@ import jax.numpy as jnp
 import jax.random as jrand
 from jax import custom_jvp
 from chex import Array, PRNGKey
-from variability import D2DVar
 from snnax.snn.layers.stateful import StateShape, StatefulLayer, default_init_fn
 from snnax.functional.surrogate import SpikeFn, superspike_surrogate
+
+from eleanor.variability import D2DVar
 
 _spike_fn = superspike_surrogate(10.0)
 
