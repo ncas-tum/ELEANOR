@@ -6,10 +6,10 @@ import jax.numpy as jnp
 import jax.random as jrand
 from jax import custom_jvp
 from chex import Array, PRNGKey
-from snnax.snn.layers.stateful import StateShape, StatefulLayer, default_init_fn
-from snnax.functional.surrogate import SpikeFn, superspike_surrogate
 
 from eleanor.variability import D2DVar
+from snnax.snn.layers.stateful import StateShape, StatefulLayer, default_init_fn
+from snnax.functional.surrogate import SpikeFn, superspike_surrogate
 
 _spike_fn = superspike_surrogate(10.0)
 
@@ -36,8 +36,10 @@ class Scaler(eqx.Module):
         else:
             self.grad_scale = grad_scale
 
-    @jax.named_scope("snnax.models.Scaler")
+    @jax.named_scope("eleanor.models.Scaler")
     def __call__(self, x: Array, *, key: Optional[PRNGKey] = None) -> Array:
+        """ """
+
         @custom_jvp
         def ste(x):
             return x * self.scale
@@ -258,6 +260,21 @@ class FeLIF(StatefulLayer):
     def init_state(
         self, shape: Union[Sequence[int], int], key: PRNGKey, *args, **kwargs
     ) -> Sequence[Array]:
+        """
+        Initialize the state of the FeLIF model.
+
+        Parameters
+        ==========
+        shape: Union[Sequence[int], int]
+            Input shape of the layer.
+        key: PRNGKey
+            JAX random key
+
+        Returns
+        =======
+        Initial state of the FeLIF neuron.
+
+        """
         k1, k2 = jrand.split(key, 2)
         init_state_vol = self.init_fn(shape, k1, *args, **kwargs)
         init_state_pol = self.initial_P * (
@@ -459,7 +476,7 @@ class Heracles(StatefulLayer):
     ) -> None:
         """
         Parameters
-        ---------
+        ==========
         A : float
             Device area [m²]
         t_fe : float
@@ -575,6 +592,21 @@ class Heracles(StatefulLayer):
     def init_state(
         self, shape: Union[Sequence[int], int], key: PRNGKey, *args, **kwargs
     ) -> Sequence[Array]:
+        """
+        Initialize the state of the Heracles model.
+
+        Parameters
+        ==========
+        shape: Union[Sequence[int], int]
+            Input shape of the layer.
+        key: PRNGKey
+            JAX random key
+
+        Returns
+        =======
+        Initial state of the Heracles neuron.
+
+        """
         init_state_vol = self.init_fn(shape, key, *args, **kwargs)
         init_state_pol = jnp.zeros(shape) - self.P_s
         init_state_spk = jnp.zeros(shape)

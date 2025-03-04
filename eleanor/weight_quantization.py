@@ -5,7 +5,7 @@ import jax
 import equinox as eqx
 import jax.numpy as jnp
 import jax.random as jrand
-from jaxtyping import Array, PRNGKeyArray
+from chex import Array, PRNGKey
 
 
 @partial(jax.jit, static_argnames=("preserve_zero", "preserve_max_val"))
@@ -32,27 +32,36 @@ def get_quant_bound(bits, preserve_zero=False, preserve_max_val=False):
 )
 def quantize_weights(
     weights: Array,
-    random_key: PRNGKeyArray,
     num_bits: int = 8,
     preserve_zero: bool = True,
     preserve_max_val: bool = False,
     stochastic: bool = True,
+    key: Optional[PRNGKey] = None,
 ) -> Array:
     """
     Quantize weights to a specified bit precision. It can apply
     stochastic rounding using the weight value as the probability
     for rounding.
 
-    Args:
-        weights: The weights to quantize.
-        random_key: A random key is used to implement stochastic rounding.
-        num_bits: Number of bits for quantization (e.g., 8 for int8).
-        preserve_zero: Preserve zero value in the quantization.
-        preserve_max_val: preserve maximum weight value in the quantization.
-        stochastic: Apply stochastic rounding based on the weight value.
+    Parameters
+    ----------
+    weights: Array
+        The weights to quantize.
+    num_bits: int
+        Number of bits for quantization (e.g., 8 for int8).
+    preserve_zero: bool
+        Preserve zero value in the quantization.
+    preserve_max_val: bool
+        preserve maximum weight value in the quantization.
+    stochastic: bool
+        Apply stochastic rounding based on the weight value.
+    key: PRNGKey
+        A random key is used to implement stochastic rounding.
+        Optional in case not using stochastic rounding.
 
-    Returns:
-        Quantized weights.
+    Returns
+    -------
+    Quantized weights.
     """
 
     # Obtaining the maximum value for the specified number of bits
@@ -72,7 +81,7 @@ def quantize_weights(
         w_ceil = jnp.ceil(scaled_weights)
 
         prob = scaled_weights - w_floor
-        index = jrand.uniform(random_key, scaled_weights.shape) < prob
+        index = jrand.uniform(key, scaled_weights.shape) < prob
         qval = jnp.where(index, w_ceil, w_floor)
     else:
         qval = jnp.round(scaled_weights)
@@ -98,19 +107,29 @@ class QuantizedLinear(eqx.nn.Linear):
         quant_bits: int = 8,
         stochastic: bool = True,
         *,
-        key: PRNGKeyArray,
+        key: PRNGKey,
     ):
-        """**Arguments:**
-
-        - `in_features`: The input size. The input to the layer should be a vector of
-            shape `(in_features,)`
-        - `out_features`: The output size. The output from the layer will be a vector
-            of shape `(out_features,)`.
-        - `use_bias`: Whether to add on a bias as well.
-        - `dtype`: The dtype to use for the weight and the bias in this layer.
+        """
+        Parameters
+        ---------
+        in_features: int
+            The input size.
+            The input to the layer should be a vector of shape `(in_features,)`
+        out_features: int
+            The output size.
+            The output from the layer will be a vector of shape `(out_features,)`.
+        use_bias: bool
+            Whether to add on a bias as well.
+        dtype: object
+            The dtype to use for the weight and the bias in this layer.
             Defaults to either `jax.numpy.float32` or `jax.numpy.float64` depending
             on whether JAX is in 64-bit mode.
-        - `key`: A `jax.random.PRNGKey` used to provide randomness for parameter
+        quant_bits: int
+            The number of bits to quantize the weights.
+        stochastic: bool
+            Whether to use stochastic rounding during the quantization.
+        key: PRNGKey
+            A `jax.random.PRNGKey` used to provide randomness for parameter
             initialisation. (Keyword only argument.)
 
         Note that `in_features` also supports the string `"scalar"` as a special value.
@@ -126,27 +145,30 @@ class QuantizedLinear(eqx.nn.Linear):
         self.stochastic = stochastic
 
     @jax.named_scope("eleanor.weight_quantization.QuantizedLinear")
-    def __call__(self, x: Array, *, key: Optional[PRNGKeyArray] = None) -> Array:
-        """**Arguments:**
-
-        - `x`: The input. Should be a JAX array of shape `(in_features,)`. (Or shape
+    def __call__(self, x: Array, *, key: Optional[PRNGKey] = None) -> Array:
+        """
+        Parameters
+        ---------
+        x: Array
+            The input. Should be a JAX array of shape `(in_features,)`. (Or shape
             `()` if `in_features="scalar"`.)
-        - `key`: Ignored; provided for compatibility with the rest of the Equinox API.
+        key: PRNGKey
+            Ignored; provided for compatibility with the rest of the Equinox API.
             (Keyword only argument.)
 
-        !!! info
+        Notes
+        -----
+        If you want to use higher order tensors as inputs (for example featuring "
+        "batch dimensions) then use `jax.vmap`. For example, for an input `x` of "
+        "shape `(batch, in_features)`, using
+        ```python
+        linear = eleanor.weight_quantization.QuantizedLinear(...)
+        jax.vmap(linear)(x)
+        ```
+        will produce the appropriate output of shape `(batch, out_features)`.
 
-            If you want to use higher order tensors as inputs (for example featuring "
-            "batch dimensions) then use `jax.vmap`. For example, for an input `x` of "
-            "shape `(batch, in_features)`, using
-            ```python
-            linear = eleanor.weight_quantization.QuantizedLinear(...)
-            jax.vmap(linear)(x)
-            ```
-            will produce the appropriate output of shape `(batch, out_features)`.
-
-        **Returns:**
-
+        Returns
+        -------
         A JAX array of shape `(out_features,)`. (Or shape `()` if
         `out_features="scalar"`.)
         """
@@ -159,11 +181,11 @@ class QuantizedLinear(eqx.nn.Linear):
         # Quantize weights straight-through estimator
         quantized_weights, scale = quantize_weights(
             self.weight,
-            key,
             num_bits=self.quant_bits,
             preserve_zero=True,
             preserve_max_val=False,
             stochastic=self.stochastic,
+            key=key,
         )
 
         # Use the straight-through estimator approach to ensure gradients

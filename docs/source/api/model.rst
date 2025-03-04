@@ -1,11 +1,7 @@
 model
 =====
 
-.. autoclass:: eleanor.models.Scaler
-   :members: __init__, __call__
-
-.. autoclass:: eleanor.models.FeLIF
-   :members: __init__, __call__
-
-.. autoclass:: eleanor.models.Heracles
-   :members: __init__, __call__
+.. automodule:: eleanor.models
+    :members:
+    :special-members: __call__, __init__
+    :show-inheritance:

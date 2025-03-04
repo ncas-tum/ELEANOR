@@ -8,6 +8,7 @@ import jax.random as jrand
 import orbax.checkpoint as ocp
 from chex import Array, PRNGKey
 from etils import epath
+
 from snnax.snn.architecture import GraphStructure, ForwardFnOutput
 from snnax.snn.layers.stateful import StatefulLayer, RequiresStateLayer
 
