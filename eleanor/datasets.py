@@ -26,7 +26,7 @@ def shuffle(dataset, shuffle_rng, batch_size):
     return (obs, labels)
 
 
-def loadBraille(nb_upsample, nb_repetitions):
+def loadBraille(nb_upsample, nb_repetitions, *, key=None):
     from io import BytesIO
     from pathlib import Path
     from zipfile import ZipFile
@@ -106,8 +106,10 @@ def loadBraille(nb_upsample, nb_repetitions):
     data = jnp.stack(upsampled_data)
     # data = upsample(data, nb_upsample)
 
-    data = jax.random.permutation(jax.random.PRNGKey(0), data, axis=0)
-    labels = jax.random.permutation(jax.random.PRNGKey(0), labels, axis=0)
+    if key is None:
+        key = jax.random.PRNGKey(0)
+    data = jax.random.permutation(key, data, axis=0)
+    labels = jax.random.permutation(key, labels, axis=0)
 
     a = int(0.8 * len(labels))
     x_train, x_test = data[:a], data[a:]

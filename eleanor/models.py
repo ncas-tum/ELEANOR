@@ -120,8 +120,8 @@ class FeLIF(StatefulLayer):
     I_dsc: float
     V_thr: float
     dt: float
-    initial_P: float
     spike_fn: SpikeFn
+    tau_fn: Callable[[Array, Array], Array]
 
     _eps0: float
 
@@ -150,7 +150,6 @@ class FeLIF(StatefulLayer):
         soft_E: float = 5e-6,
         I_dsc: float = 10e-12,
         V_thr: float = 2.5,
-        initial_P: float = 0.1478602,
         variability: float = 0.0,
         dt: float = 1e-3,
         paramsScale: float = 1e12,
@@ -193,8 +192,6 @@ class FeLIF(StatefulLayer):
             Discharge current, set the "dendritic time constant"
         V_thr : float
             Spiking threshold
-        initial_P : float
-            Initial polarization value
         variability: float
             Device to device variability of the device and input current.
         dt : float
@@ -254,8 +251,28 @@ class FeLIF(StatefulLayer):
         self.t_hzo_var = D2DVar("t_hzo", variability, k6)
         self.t_int_var = D2DVar("t_int", variability, k7)
 
-        self.initial_P = initial_P
         self.dt = dt
+
+        @jax.custom_gradient
+        def tau_fn(E, E_a):
+            tau_0 = self.tau_0
+            tau = 1 / (
+                self.tau_0 * jnp.exp((E_a / (jnp.abs(E) + self.soft_E)) ** self.alpha)
+            )
+
+            exponential = (E_a / (jnp.abs(E) + self.soft_E)) ** self.alpha
+            numerator = self.alpha * jnp.exp(-exponential) * exponential
+            denumerator = tau_0 * self.soft_E * jnp.abs(E) + tau_0 * E**2
+            denumerator = jnp.where(
+                denumerator, denumerator, 1.0
+            )  # If E is 0 then tangent_E is 0
+
+            tangent_E = (E * numerator) / denumerator
+            tangent_E_a = -numerator / (tau_0 * E_a)
+
+            return tau, lambda g: (g * tangent_E, g * tangent_E_a)
+
+        self.tau_fn = tau_fn
 
     def init_state(
         self, shape: Union[Sequence[int], int], key: PRNGKey, *args, **kwargs
@@ -277,7 +294,7 @@ class FeLIF(StatefulLayer):
         """
         k1, k2 = jrand.split(key, 2)
         init_state_vol = self.init_fn(shape, k1, *args, **kwargs)
-        init_state_pol = self.initial_P * (
+        init_state_pol = -self.P_s * (
             1 + self.P_s_var.variability * jrand.normal(k2, shape)
         )
         init_state_spk = jnp.zeros(shape)
@@ -292,39 +309,14 @@ class FeLIF(StatefulLayer):
     def __call__(
         self, state: Array, synaptic_input: Array, *, key: Optional[PRNGKey] = None
     ) -> Tuple[Sequence[Array], Sequence[Array]]:
-        @jax.custom_vjp
-        def tau_fn(E, E_a):
-            tau = self.tau_0 * jnp.exp((E_a / (jnp.abs(E) + self.soft_E)) ** self.alpha)
-
-            return tau
-
-        def tau_fn_fwd(E, E_a):
-            return tau_fn(E, E_a), (E, E_a)
-
-        def tau_fn_bw(res, g):
-            (E, E_a) = res
-            exp_x = jnp.clip((E_a / (jnp.abs(E) + self.soft_E)) ** self.alpha, 0, 1)
-            tau_prime = -(
-                self.tau_0
-                * E_a
-                * self.alpha
-                * E
-                * jnp.exp(exp_x)
-                * (E_a / (jnp.abs(E) + self.soft_E)) ** (self.alpha - 1)
-            ) / (jnp.abs(E) * (E + self.soft_E) ** 2)
-
-            tangents_out = (g * tau_prime, None)
-            return tangents_out
-
-        tau_fn.defvjp(tau_fn_fwd, tau_fn_bw)
 
         def step(state, synaptic_input):
             v, p, s, cap_divider, depol_divider, E_a, P_s, A, I_0, C_tot = state
             E = v * cap_divider - p * depol_divider
 
-            tau = tau_fn(E, E_a)
+            tau = self.tau_fn(E, E_a)
 
-            I_p_new = (jnp.sign(E) * P_s - p) * A / tau
+            I_p_new = (jnp.sign(E) * P_s - p) * A * tau
             dp = I_p_new / A
             p_new = jnp.clip(p + 1e-3 * self.dt * dp, -P_s, P_s)
 
@@ -344,9 +336,9 @@ class FeLIF(StatefulLayer):
         ):
             E = v * cap_divider - p * depol_divider
 
-            tau = tau_fn(E, E_a)
+            tau = self.tau_fn(E, E_a)
 
-            I_p_new = (jnp.sign(E) * P_s - p) * A / jax.lax.stop_gradient(tau)
+            I_p_new = (jnp.sign(E) * P_s - p) * A * jax.lax.stop_gradient(tau)
             dp = I_p_new / A
 
             I_leak = (I_0 * A * jnp.expm1(v / self.V_t) + self.I_dsc) * jnp.sign(v)
@@ -408,6 +400,63 @@ class FeLIF(StatefulLayer):
         return [state, [s, v, p]]
 
 
+class NoBruno(FeLIF):
+
+    @jax.named_scope("eleanor.models.NoBruno")
+    def __call__(
+        self, state: Array, synaptic_input: Array, *, key: Optional[PRNGKey] = None
+    ) -> Tuple[Sequence[Array], Sequence[Array]]:
+
+        def step(
+            v, p, synaptic_input, cap_divider, depol_divider, E_a, P_s, A, I_0, C_tot
+        ):
+            E = v * cap_divider - p * depol_divider
+
+            tau = self.tau_fn(E, E_a)
+
+            I_p_new = (jnp.sign(E) * P_s - p) * A * jax.lax.stop_gradient(tau)
+            dp = I_p_new / A
+
+            I_leak = (I_0 * A * jnp.expm1(v / self.V_t) + self.I_dsc) * jnp.sign(v)
+            dv = (synaptic_input - I_leak - I_p_new) / C_tot
+
+            p = jnp.clip(p + self.dt * dp, -P_s, P_s)
+            v = jnp.clip(v + self.dt * dv, -5, 5)
+
+            return v, p
+
+        v, p, s = state
+
+        A = self.A_var(self.A, v.shape)
+        E_a = self.E_a_var(self.E_a, v.shape)
+        P_s = self.P_s_var(self.P_s, v.shape)
+        I_0 = self.I_0_var(self.I_0, v.shape)
+        t_hzo = self.t_hzo_var(self.t_hzo, v.shape)
+        t_int = self.t_int_var(self.t_int, v.shape)
+
+        synaptic_input = self.Iin_var(synaptic_input, v.shape)
+
+        C_0 = self._eps0 * self.eps_hzo / t_hzo * A
+        C_tot = C_0 + self.C_par
+
+        cap_divider = self.eps_int / (t_hzo * self.eps_int + t_int * self.eps_hzo)
+        depol_divider = (
+            1 / self._eps0 * t_int / (t_hzo * self.eps_int + t_int * self.eps_hzo)
+        )
+
+        v, p = step(
+            v, p, synaptic_input, cap_divider, depol_divider, E_a, P_s, A, I_0, C_tot
+        )
+
+        spikes_ref = jax.lax.stop_gradient(s)
+        v = (1 - spikes_ref) * v - 1.5 * spikes_ref
+        p = (1 - spikes_ref) * p - (spikes_ref * P_s)  # 0.05308533)
+        s = self.spike_fn(v - self.V_thr)
+
+        state = [v, p, s]
+        return [state, [s, v, p]]
+
+
 class Heracles(StatefulLayer):
     """
     Implementation of Heracles neural model [2]_
@@ -440,10 +489,11 @@ class Heracles(StatefulLayer):
     _h: float
     spike_fn: SpikeFn
 
+    # Parameters with variability
     A_var: D2DVar
     n_depl_var: D2DVar
     P_s_var: D2DVar
-    # t_int_var dist=gauss std=2.2e-10
+    t_fe_var: D2DVar
 
     paramsScale: float
 

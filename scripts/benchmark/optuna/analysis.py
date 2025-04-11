@@ -9,20 +9,21 @@ import optuna
 import pandas as pd
 import equinox as eqx
 import jax.numpy as jnp
-import snnax.snn as snn
 import jax.random as jrandom
 import optuna.storages.journal
 from chex import Array, PRNGKey
 from tqdm import trange
+
+import snnax.snn as snn
+from eleanor.models import FeLIF, Heracles
+from eleanor.datasets import shuffle, loadBraille
 from snnax.snn.layers.stateful import StateShape, StatefulOutput, default_init_fn
 from snnax.functional.surrogate import SpikeFn, superspike_surrogate
-
-from eleanor.models import FeLIFV2, Heracles
-from eleanor.datasets import shuffle, loadBraille
 from eleanor.weight_quantization import QuantizedLinear
 
 NBEPOCHS = 150
-BATCHSIZE = 128
+BATCHSIZE_TRAIN = 128  # 4320
+BATCHSIZE_TEST = 128  # 1080
 
 
 # Model definition
@@ -41,6 +42,9 @@ class EncodingLayer(eqx.Module):
         return output
 
 
+_spikefn = superspike_surrogate(10.0)
+
+
 class RLIF(snn.LIF):
     recurrent: eqx.Module
 
@@ -49,7 +53,7 @@ class RLIF(snn.LIF):
         n_features,
         quant_bits,
         decay_constants: Union[Sequence[float], Array],
-        spike_fn: SpikeFn = superspike_surrogate(10.0),
+        spike_fn: SpikeFn = _spikefn,
         threshold: Array = 1.0,
         stop_reset_grad: bool = True,
         reset_val: Optional[Array] = None,
@@ -132,7 +136,7 @@ def define_model(key, model_name, quant_bits, use_bias, trial):
         V_thr = trial.suggest_float("V_thr", 2.5, 3.5, log=False)
         paramScale = 10 ** trial.suggest_int("paramScale", 5, 12)
         if model_name == "FeLIF":
-            ouputLayer = FeLIFV2(dt=1e-3, V_thr=V_thr, paramsScale=paramScale, key=key4)
+            ouputLayer = FeLIF(dt=1e-3, V_thr=V_thr, paramsScale=paramScale, key=key4)
         else:
             ouputLayer = Heracles(
                 dt=1e-3, V_thr=V_thr, paramsScale=paramScale, key=key4
@@ -201,7 +205,7 @@ def loss_fn(model, in_states, in_spikes, tgt_class, key):
 # subsequently jitting the resulting function
 @eqx.filter_value_and_grad
 def loss_and_grad(model, in_states, in_spikes, tgt_class, key):
-    keys = jax.random.split(key, BATCHSIZE)
+    keys = jax.random.split(key, in_spikes.shape[0])
     return jnp.mean(loss_fn(model, in_states, in_spikes, tgt_class, keys))
 
 
@@ -215,7 +219,7 @@ def accuracy_fn(model, in_states, in_spikes, tgt_class, key):
 
 @eqx.filter_jit
 def calc_accuracy(model, in_states, in_spikes, tgt_class, key):
-    keys = jax.random.split(key, BATCHSIZE)
+    keys = jax.random.split(key, in_spikes.shape[0])
     accuracy = accuracy_fn(model, in_states, in_spikes, tgt_class, keys)
     return jnp.mean(accuracy)
 
@@ -255,7 +259,7 @@ def _objective(model_name, quant_bits, use_bias, trial, seed):
     pbar = trange(0, NBEPOCHS, leave=False)
     for _ in pbar:
         key, epoch_key, train_key, test_key = jax.random.split(key, 4)
-        x_train, y_train = shuffle(trainset, epoch_key, BATCHSIZE)
+        x_train, y_train = shuffle(trainset, epoch_key, BATCHSIZE_TRAIN)
 
         loss_train = []
         for i, (in_spikes, tgt_class) in enumerate(zip(x_train, y_train)):
@@ -273,7 +277,7 @@ def _objective(model_name, quant_bits, use_bias, trial, seed):
         loss_train = jnp.mean(jnp.asarray(loss_train))
         total_loss.append(loss_train.item())
 
-        x_test, y_test = shuffle(testset, jax.random.key(0), BATCHSIZE)
+        x_test, y_test = shuffle(testset, jax.random.key(0), BATCHSIZE_TEST)
         accuracy_test = []
         for i, (in_spikes, tgt_class) in enumerate(zip(x_test, y_test)):
             # Initializing the membrane potentials of LIF neurons
@@ -283,14 +287,15 @@ def _objective(model_name, quant_bits, use_bias, trial, seed):
             accuracy_test.append(accuracy)
         accuracy_test = jnp.mean(jnp.asarray(accuracy_test))
         total_accuracy.append(accuracy_test.item())
+        pbar.set_postfix({"Acc": accuracy_test.item()})
 
     return total_accuracy, total_loss
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("-m", "--model", type=str, required=True)
-parser.add_argument("-q", "--quantization", type=str, required=True)
-parser.add_argument("--seed", type=int, required=True)
+parser.add_argument("-m", "--model", type=str, default="FeLIF")
+parser.add_argument("-q", "--quantization", type=str, default="FP")
+parser.add_argument("--seed", type=int, default=0)
 
 args = parser.parse_args()
 print(args.model, args.quantization, args.seed)
@@ -303,7 +308,7 @@ else:
     raise Exception(f"Model {args.model} not found")
 
 objective = partial(_objective, args.model, args.quantization, False)
-storage = optuna.storages.RDBStorage("sqlite:///bruno_nobias_bk3.db")
+storage = optuna.storages.RDBStorage("sqlite:///bruno.db")
 
 study = optuna.load_study(
     storage=storage, study_name=f"{args.quantization}bit {args.model}"
