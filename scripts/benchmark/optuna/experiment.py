@@ -40,6 +40,9 @@ class EncodingLayer(eqx.Module):
         return output
 
 
+_spikefn = superspike_surrogate(10.0)
+
+
 class RLIF(snn.LIF):
     recurrent: eqx.Module
 
@@ -48,7 +51,7 @@ class RLIF(snn.LIF):
         n_features,
         quant_bits,
         decay_constants: Union[Sequence[float], Array],
-        spike_fn: SpikeFn = superspike_surrogate(10.0),
+        spike_fn: SpikeFn = _spikefn,
         threshold: Array = 1.0,
         stop_reset_grad: bool = True,
         reset_val: Optional[Array] = None,
