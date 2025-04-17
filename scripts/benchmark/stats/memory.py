@@ -1,4 +1,3 @@
-import time
 from typing import Union, Callable, Optional, Sequence
 
 import jax
@@ -12,8 +11,6 @@ from snnax.snn.layers.stateful import StatefulOutput, default_init_fn
 from snnax.functional.surrogate import SpikeFn, superspike_surrogate
 
 from eleanor.models import FeLIF, NoBruno, Heracles
-
-jax.config.update("jax_platform_name", "cpu")
 
 
 class Tanh(eqx.Module):
@@ -125,7 +122,7 @@ def setup(key, hidden_size, seq_len, input_features, model_name):
     return model, dummy_input
 
 
-def time_forward(hidden_size, seq_len, input_features, model_name):
+def memory_forward(hidden_size, seq_len, input_features, model_name):
     key = jrand.key(0)
     key_setup, key = jrand.split(key)
 
@@ -138,18 +135,10 @@ def time_forward(hidden_size, seq_len, input_features, model_name):
     _, output = model(init_state, dummy_input, key=run_key)
     output = jax.tree.map(lambda x: x.block_until_ready(), output)
 
-    # Timing loop
-    times = []
-    for _ in range(2):
-        start = time.process_time_ns()
-        for _ in range(10):
-            _, output = model(init_state, dummy_input, key=run_key)
-            output = jax.tree.map(lambda x: x.block_until_ready(), output)
-        end = time.process_time_ns()
-        avg_time = (end - start) / 10  # Convert to milliseconds
-        times.append(avg_time)
+    stats = jax.devices()[0].memory_stats()
+    peak_memory = stats.get("peak_bytes_in_use", 0)
 
-    return times
+    return peak_memory
 
 
 @eqx.filter_jit
@@ -163,17 +152,14 @@ def loss_felif(output):
 
 
 @eqx.filter_grad
-def loss_fn(model, input_, loss_neuron, *, key):
+def loss_fn(model, input_, init_state, loss_neuron, *, key):
     # Initialize parameters and run forward pass
-    init_key, run_key = jax.random.split(key)
-    init_state = model.init_state((input_features,), key=init_key)
-    _, output = model(init_state, input_, key=run_key)
-
+    _, output = model(init_state, input_, key=key)
     loss = loss_neuron(output[-1])
     return loss
 
 
-def time_backward(hidden_size, seq_len, input_features, model_name):
+def memory_backward(hidden_size, seq_len, input_features, model_name):
     key = jrand.key(0)
     key_setup, key = jrand.split(key)
 
@@ -183,21 +169,16 @@ def time_backward(hidden_size, seq_len, input_features, model_name):
     loss_neuron = (
         loss_felif if model_name == "FeLIF" or model_name == "Bruno" else loss_lif
     )
-    grads = loss_fn(model, dummy_input, loss_neuron, key=key)
+
+    init_key, loss_key = jax.random.split(key)
+    init_state = model.init_state((input_features,), key=init_key)
+    grads = loss_fn(model, dummy_input, init_state, loss_neuron, key=loss_key)
     grads = jax.tree.map(lambda x: x.block_until_ready(), grads)
 
-    # Timing loop
-    times = []
-    for _ in range(2):
-        start = time.process_time_ns()
-        for _ in range(10):
-            grads = loss_fn(model, dummy_input, loss_neuron, key=key)
-            grads = jax.tree.map(lambda x: x.block_until_ready(), grads)
-        end = time.process_time_ns()
-        avg_time = (end - start) / 10  # Convert to milliseconds
-        times.append(avg_time)
+    stats = jax.devices()[0].memory_stats()
+    peak_memory = stats.get("peak_bytes_in_use", 0)
 
-    return times
+    return peak_memory
 
 
 if __name__ == "__main__":
@@ -218,37 +199,36 @@ if __name__ == "__main__":
 
     # Process tasks sequentially to avoid GPU memory conflicts
     if args.method == "forward":
-        measure_memory = time_forward
+        measure_memory = memory_forward
     else:
-        measure_memory = time_backward
+        measure_memory = memory_backward
 
     eqx.clear_caches()
     jax.clear_caches()
     seq_len = 1000 * args.seq_len if args.model == "FeLIF" else args.seq_len
-    total_time = measure_memory(args.hidden, seq_len, input_features, args.model)
-    results = (args.hidden, args.seq_len, args.model, total_time)
+    total_memory = measure_memory(args.hidden, seq_len, input_features, args.model)
+    results = (args.hidden, args.seq_len, args.model, total_memory)
 
     # Organize results for plotting
     hs, sl, mdl, t = results
     time_data = {
-        "Hidden Size": [hs] * len(t),
-        "Sequence Length": [sl] * len(t),
-        # "Peak Memory Usage": [],
-        "Time": t,
-        "Model": [mdl] * len(t),
+        "Hidden Size": [hs],
+        "Sequence Length": [sl],
+        "Peak Memory Usage": [t],
+        "Model": [mdl],
     }
 
     print(time_data)
 
     try:
         df = pd.read_csv(
-            f"results/time/time-{args.method}-{args.hidden}-{args.seq_len}-{args.model}.csv"
+            f"results/memory/memory-{args.method}-{args.hidden}-{args.seq_len}-{args.model}.csv"
         )
         df = pd.concat([df, pd.DataFrame(time_data)])
     except FileNotFoundError:
         df = pd.DataFrame(time_data)
 
     df.to_csv(
-        f"results/time/time-{args.method}-{args.hidden}-{args.seq_len}-{args.model}.csv",
+        f"results/memory/memory-{args.method}-{args.hidden}-{args.seq_len}-{args.model}.csv",
         index=False,
     )
