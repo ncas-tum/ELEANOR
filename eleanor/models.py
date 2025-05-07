@@ -1,15 +1,14 @@
-from typing import Tuple, Union, Callable, Optional, Sequence
+from typing import Callable, Optional, Sequence, Tuple, Union
 
-import jax
 import equinox as eqx
+import jax
 import jax.numpy as jnp
 import jax.random as jrand
-from jax import custom_jvp
 from chex import Array, PRNGKey
-
 from eleanor.variability import D2DVar
-from snnax.snn.layers.stateful import StateShape, StatefulLayer, default_init_fn
+from jax import custom_jvp
 from snnax.functional.surrogate import SpikeFn, superspike_surrogate
+from snnax.snn.layers.stateful import StatefulLayer, StateShape, default_init_fn
 
 _spike_fn = superspike_surrogate(10.0)
 
@@ -52,6 +51,118 @@ class Scaler(eqx.Module):
             return primal_out, x_dot * self.grad_scale
 
         return ste(x)
+
+
+def tau_surr(alpha: float = 1.3, E_a: float = 1.0, soft_E: float = 1e-18):
+    @jax.custom_gradient
+    def surrogate(E, tau_p):
+        exponential = (E_a / (jnp.abs(E) + soft_E)) ** alpha
+
+        tau = 1 / (tau_p * jnp.exp(exponential))
+
+        # Tau_p gradient
+        grad_tau_p = -jnp.exp(-exponential) / (tau_p**2)
+
+        # E gradient
+        numerator = alpha * E * jnp.exp(-exponential) * exponential
+        denumerator = soft_E * tau_p * jnp.abs(E) + E**2 * tau_p
+        denumerator = jnp.where(
+            jnp.abs(E) > 0.0, denumerator, 1.0  # If E is 0 then the numerator is also 0
+        )
+        grad_E = numerator / denumerator
+
+        return tau, lambda g: (g * grad_E, g * grad_tau_p)
+
+    return surrogate
+
+
+_tau_fn = tau_surr()
+
+
+class FeLIFSimple(StatefulLayer):
+    tau_p: float
+    gamma: float
+    P_s: float
+    alpha: float
+    beta: float
+    threshold: float
+    dt: float
+    spike_fn: SpikeFn
+
+    def __init__(
+        self,
+        tau_p: float,
+        tau_m: float,
+        P_s: float = 0.27,
+        alpha: float = 1.0,
+        beta: float = 1.0,
+        dt: float = 1e-3,
+        threshold: float = 1.0,
+        spike_fn: SpikeFn = _spike_fn,
+        init_fn: Optional[Callable] = default_init_fn,
+        shape: Optional[StateShape] = None,
+        key: PRNGKey = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(init_fn, shape)
+        self.spike_fn = spike_fn
+
+        self.P_s = P_s
+        self.gamma = jnp.exp(-dt / tau_m)
+        self.tau_p = tau_p
+        self.alpha = alpha
+        self.beta = beta
+        self.dt = dt
+        self.threshold = threshold
+
+    def init_state(
+        self, shape: Union[Sequence[int], int], key: PRNGKey, *args, **kwargs
+    ) -> Sequence[Array]:
+        """
+        Initialize the state of the FeLIF model.
+
+        Parameters
+        ==========
+        shape: Union[Sequence[int], int]
+            Input shape of the layer.
+        key: PRNGKey
+            JAX random key
+
+        Returns
+        =======
+        Initial state of the FeLIF neuron.
+
+        """
+        k1, k2 = jrand.split(key, 2)
+        init_state_vol = self.init_fn(shape, k1, *args, **kwargs)
+        init_state_pol = self.init_fn(shape, k2, *args, **kwargs)
+        init_state_spk = jnp.zeros(shape)
+        return [init_state_vol, init_state_pol, init_state_spk]
+
+    @jax.named_scope("eleanor.models.FeLIF")
+    def __call__(
+        self, state: Array, synaptic_input: Array, *, key: Optional[PRNGKey] = None
+    ) -> Tuple[Sequence[Array], Sequence[Array]]:
+        v, p, s = state
+
+        E = v * self.alpha - p * self.beta
+        tau = _tau_fn(E, self.tau_p)
+        gamma_p = jnp.exp(-self.dt * tau)
+
+        Ip = self.P_s * (jnp.sign(E) - p) * self.dt * tau
+        p = gamma_p * p + (1 - gamma_p) * jnp.sign(E)
+        v = self.gamma * v - (1 - self.gamma) * Ip + synaptic_input
+
+        spikes_ref = jax.lax.stop_gradient(s)
+        p = p - p * spikes_ref
+        v = v - v * spikes_ref
+        v = jnp.clip(v, -5, 5)
+        s = self.spike_fn(v - self.threshold)
+
+        # s = synaptic_input + jax.lax.stop_gradient(s - synaptic_input)
+
+        state = [v, p, s]
+        return [state, [s, v, p]]
 
 
 class FeLIF(StatefulLayer):
@@ -309,7 +420,6 @@ class FeLIF(StatefulLayer):
     def __call__(
         self, state: Array, synaptic_input: Array, *, key: Optional[PRNGKey] = None
     ) -> Tuple[Sequence[Array], Sequence[Array]]:
-
         def step(state, synaptic_input):
             v, p, s, cap_divider, depol_divider, E_a, P_s, A, I_0, C_tot = state
             E = v * cap_divider - p * depol_divider
@@ -401,12 +511,10 @@ class FeLIF(StatefulLayer):
 
 
 class NoBruno(FeLIF):
-
     @jax.named_scope("eleanor.models.NoBruno")
     def __call__(
         self, state: Array, synaptic_input: Array, *, key: Optional[PRNGKey] = None
     ) -> Tuple[Sequence[Array], Sequence[Array]]:
-
         def step(
             v, p, synaptic_input, cap_divider, depol_divider, E_a, P_s, A, I_0, C_tot
         ):
