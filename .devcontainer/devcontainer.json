@@ -1,8 +1,6 @@
 {
 	"name": "Python 3",
-	"build": {
-		"dockerfile": "Dockerfile"
-	},
+	"image": "ferqui/devenv",
 	"hostRequirements": {
 		"gpu": "optional"
 	},
@@ -18,9 +16,10 @@
 				"ms-python.flake8",
 				"ms-toolsai.jupyter",
 				"ms-python.vscode-pylance",
-				"ms-python.debugpy"
+				"ms-python.debugpy",
+				"ms-python.isort"
 			]
 		}
 	},
-	"postCreateCommand": "pip install -e \".[dev,cuda]\""
+	"postCreateCommand": "bash install.sh"
 }
