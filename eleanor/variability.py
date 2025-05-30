@@ -4,7 +4,6 @@ import jax
 import equinox as eqx
 import jax.random as jrand
 from chex import Array, PRNGKey
-
 from snnax.snn.composed import StateShape
 
 

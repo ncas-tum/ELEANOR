@@ -9,16 +9,16 @@ import optuna
 import pandas as pd
 import equinox as eqx
 import jax.numpy as jnp
+import snnax.snn as snn
 import jax.random as jrandom
 import optuna.storages.journal
 from chex import Array, PRNGKey
 from tqdm import trange
-
-import snnax.snn as snn
-from eleanor.models import FeLIF, Heracles
-from eleanor.datasets import shuffle, loadBraille
 from snnax.snn.layers.stateful import StateShape, StatefulOutput, default_init_fn
 from snnax.functional.surrogate import SpikeFn, superspike_surrogate
+
+from eleanor.models import Bruno, Heracles
+from eleanor.datasets import shuffle, loadBraille
 from eleanor.weight_quantization import QuantizedLinear
 
 NBEPOCHS = 150
@@ -136,7 +136,7 @@ def define_model(key, model_name, quant_bits, use_bias, trial):
         V_thr = trial.suggest_float("V_thr", 2.5, 3.5, log=False)
         paramScale = 10 ** trial.suggest_int("paramScale", 5, 12)
         if model_name == "FeLIF":
-            ouputLayer = FeLIF(dt=1e-3, V_thr=V_thr, paramsScale=paramScale, key=key4)
+            ouputLayer = Bruno(dt=1e-3, V_thr=V_thr, paramsScale=paramScale, key=key4)
         else:
             ouputLayer = Heracles(
                 dt=1e-3, V_thr=V_thr, paramsScale=paramScale, key=key4

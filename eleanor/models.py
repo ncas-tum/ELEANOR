@@ -1,14 +1,15 @@
-from typing import Callable, Optional, Sequence, Tuple, Union
+from typing import Tuple, Union, Callable, Optional, Sequence
 
-import equinox as eqx
 import jax
+import equinox as eqx
 import jax.numpy as jnp
 import jax.random as jrand
-from chex import Array, PRNGKey
-from eleanor.variability import D2DVar
 from jax import custom_jvp
+from chex import Array, PRNGKey
+from snnax.snn.layers.stateful import StateShape, StatefulLayer, default_init_fn
 from snnax.functional.surrogate import SpikeFn, superspike_surrogate
-from snnax.snn.layers.stateful import StatefulLayer, StateShape, default_init_fn
+
+from eleanor.variability import D2DVar
 
 _spike_fn = superspike_surrogate(10.0)
 
@@ -76,11 +77,9 @@ def tau_surr(alpha: float = 1.3, E_a: float = 1.0, soft_E: float = 1e-18):
     return surrogate
 
 
-_tau_fn = tau_surr()
-
-
-class FeLIFSimple(StatefulLayer):
+class FeLIF(StatefulLayer):
     tau_p: float
+    tau_m: float
     gamma: float
     P_s: float
     alpha: float
@@ -88,6 +87,7 @@ class FeLIFSimple(StatefulLayer):
     threshold: float
     dt: float
     spike_fn: SpikeFn
+    _tau_fn: Callable
 
     def __init__(
         self,
@@ -101,6 +101,9 @@ class FeLIFSimple(StatefulLayer):
         spike_fn: SpikeFn = _spike_fn,
         init_fn: Optional[Callable] = default_init_fn,
         shape: Optional[StateShape] = None,
+        tau_alpha: float = 1.3,
+        E_a: float = 1.0,
+        soft_E: float = 1e-18,
         key: PRNGKey = None,
         **kwargs,
     ) -> None:
@@ -109,11 +112,13 @@ class FeLIFSimple(StatefulLayer):
 
         self.P_s = P_s
         self.gamma = jnp.exp(-dt / tau_m)
+        self.tau_m = tau_m
         self.tau_p = tau_p
         self.alpha = alpha
         self.beta = beta
         self.dt = dt
         self.threshold = threshold
+        self._tau_fn = tau_surr(tau_alpha, E_a, soft_E)
 
     def init_state(
         self, shape: Union[Sequence[int], int], key: PRNGKey, *args, **kwargs
@@ -135,7 +140,7 @@ class FeLIFSimple(StatefulLayer):
         """
         k1, k2 = jrand.split(key, 2)
         init_state_vol = self.init_fn(shape, k1, *args, **kwargs)
-        init_state_pol = self.init_fn(shape, k2, *args, **kwargs)
+        init_state_pol = self.init_fn(shape, k2, *args, **kwargs) - 1
         init_state_spk = jnp.zeros(shape)
         return [init_state_vol, init_state_pol, init_state_spk]
 
@@ -146,7 +151,7 @@ class FeLIFSimple(StatefulLayer):
         v, p, s = state
 
         E = v * self.alpha - p * self.beta
-        tau = _tau_fn(E, self.tau_p)
+        tau = self._tau_fn(E, self.tau_p)
         gamma_p = jnp.exp(-self.dt * tau)
 
         Ip = self.P_s * (jnp.sign(E) - p) * self.dt * tau
@@ -154,7 +159,7 @@ class FeLIFSimple(StatefulLayer):
         v = self.gamma * v - (1 - self.gamma) * Ip + synaptic_input
 
         spikes_ref = jax.lax.stop_gradient(s)
-        p = p - p * spikes_ref
+        p = p - (p + 1) * spikes_ref
         v = v - v * spikes_ref
         v = jnp.clip(v, -5, 5)
         s = self.spike_fn(v - self.threshold)
@@ -165,7 +170,7 @@ class FeLIFSimple(StatefulLayer):
         return [state, [s, v, p]]
 
 
-class FeLIF(StatefulLayer):
+class Bruno(StatefulLayer):
     """
     Implementation of FeLIF neuron model [1]_ using Bruno for gradient updates.
 
@@ -510,7 +515,7 @@ class FeLIF(StatefulLayer):
         return [state, [s, v, p]]
 
 
-class NoBruno(FeLIF):
+class NoBruno(Bruno):
     @jax.named_scope("eleanor.models.NoBruno")
     def __call__(
         self, state: Array, synaptic_input: Array, *, key: Optional[PRNGKey] = None

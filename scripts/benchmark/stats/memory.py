@@ -10,7 +10,7 @@ from snnax.snn.composed import StateShape
 from snnax.snn.layers.stateful import StatefulOutput, default_init_fn
 from snnax.functional.surrogate import SpikeFn, superspike_surrogate
 
-from eleanor.models import FeLIF, NoBruno, Heracles
+from eleanor.models import Bruno, NoBruno, Heracles
 
 
 class Tanh(eqx.Module):
@@ -96,7 +96,7 @@ def setup(key, hidden_size, seq_len, input_features, model_name):
     elif model_name == "RLIF":
         outputLayer = RLIF(hidden_size, [0.9], key=key_model)
     elif model_name == "Bruno":
-        outputLayer = FeLIF(
+        outputLayer = Bruno(
             dt=1e-3, V_thr=2.5, P_s=0.22, paramsScale=1e9, key=key_model
         )
     elif model_name == "FeLIF":
@@ -137,7 +137,6 @@ def memory_forward(hidden_size, seq_len, input_features, model_name):
 
     stats = jax.devices()[0].memory_stats()
     peak_memory = stats.get("peak_bytes_in_use", 0)
-
     return peak_memory
 
 
