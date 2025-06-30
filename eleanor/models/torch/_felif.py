@@ -95,7 +95,8 @@ class FeLIF(SpikingNeuron):
 
         if self.init_hidden and (mem is not None or pol is not None):
             raise TypeError(
-                "`mem` or `syn` should not be passed as an argument while `init_hidden=True`"
+                "`mem` or `syn` should not be passed as an argument "
+                "while `init_hidden=True`"
             )
 
         if not self.pol.shape == input_.shape:

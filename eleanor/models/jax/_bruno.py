@@ -323,32 +323,6 @@ class Bruno(StatefulLayer):
 
             return tau, lambda g: (g * tangent_E, g * tangent_E_a)
 
-        # Legacy
-        # @jax.custom_gradient
-        # def tau_fn(E, E_a):
-        #     tau = self.tau_0 * jnp.exp((E_a / (jnp.abs(E) + self.soft_E)) ** self.alpha)
-
-        #     exp_x = jnp.clip(
-        #         (E_a / (jnp.abs(E) + self.soft_E)) ** self.alpha, 0, 1
-        #     )
-        #     tangent_E = -(
-        #         self.tau_0
-        #         * E_a
-        #         * self.alpha
-        #         * E
-        #         * jnp.exp(exp_x)
-        #         * (self.E_a / (jnp.abs(E) + self.soft_E)) ** (self.alpha + 1)
-        #     ) / (jnp.abs(E) * (E + self.soft_E) ** 2)
-
-        #     tangent_E_a = -(
-        #         self.tau_0
-        #         * self.alpha
-        #         * jnp.exp(exp_x)
-        #         * exp_x
-        #     ) / E_a
-
-        #     return tau, lambda g: (g * tangent_E, g * tangent_E_a)
-
         self.tau_fn = tau_fn
 
     def init_state(
@@ -419,7 +393,6 @@ class Bruno(StatefulLayer):
             tau = self.tau_fn(E, E_a)
 
             I_p_new = (jnp.sign(E) * P_s - p) * A * jax.lax.stop_gradient(tau)
-            # I_p_new = (jnp.sign(E) * P_s - p) * A / jax.lax.stop_gradient(tau) # Legacy
             dp = I_p_new / A
 
             I_leak = (I_0 * A * jnp.expm1(v / self.V_t) + self.I_dsc) * jnp.sign(v)
@@ -495,7 +468,6 @@ class NoBruno(Bruno):
             tau = self.tau_fn(E, E_a)
 
             I_p_new = (jnp.sign(E) * P_s - p) * A * jax.lax.stop_gradient(tau)
-            # I_p_new = (jnp.sign(E) * P_s - p) * A / jax.lax.stop_gradient(tau)  # Legacy
             dp = I_p_new / A
 
             I_leak = (I_0 * A * jnp.expm1(v / self.V_t) + self.I_dsc) * jnp.sign(v)

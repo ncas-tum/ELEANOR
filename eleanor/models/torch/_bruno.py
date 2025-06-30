@@ -47,9 +47,7 @@ def _backward(ctx, grads):
         ctx.tau_0
         * torch.exp(torch.pow(ctx.E_a / (torch.abs(E) + ctx.soft_E), ctx.alpha))
     )
-    # I_p = I_pa * I_pb
 
-    # tau = 1 / (ctx.tau_0*torch.exp((ctx.E_a / (torch.abs(E) + ctx.soft_E)) ** ctx.alpha))
     exponential = (ctx.E_a / (torch.abs(E) + ctx.soft_E)) ** ctx.alpha
     numerator = ctx.alpha * torch.exp(-exponential) * exponential
     denumerator = ctx.tau_0 * ctx.soft_E * torch.abs(E) + ctx.tau_0 * E**2
@@ -296,7 +294,8 @@ class Bruno(SpikingNeuron):
 
         if self.init_hidden and (mem is not None or pol is not None):
             raise TypeError(
-                "`mem` or `pol` should not be passed as an argument while `init_hidden=True`"
+                "`mem` or `pol` should not be passed as an argument "
+                "while `init_hidden=True`"
             )
         if not self.pol.shape == input_.shape:
             self.pol = torch.zeros_like(input_, device=self.pol.device) - self.P_s

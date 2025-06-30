@@ -103,7 +103,8 @@ class D2DVar(torch.nn.Module):
 
         Returns
         -------
-        torch.Tensor with coefficient of variation :math:`\\text{variability} = \\sigma/\\mu`
+        torch.Tensor with coefficient of variation
+        :math:`\\text{variability} = \\sigma/\\mu`
         """
         if not self._rval.shape == shape:
             self.update_variability(shape)
