@@ -9,15 +9,14 @@ import equinox as eqx
 import jax.numpy as jnp
 import snnax.snn as snn
 import jax.random as jrandom
-import optuna.storages.journal
 from chex import Array, PRNGKey
 from tqdm import trange
 from snnax.snn.layers.stateful import StateShape, StatefulOutput, default_init_fn
 from snnax.functional.surrogate import SpikeFn, superspike_surrogate
 
-from eleanor.models import Bruno, Heracles
 from eleanor.datasets import shuffle, loadBraille
-from eleanor.weight_quantization import QuantizedLinear
+from eleanor.models.jax import Bruno, Heracles
+from eleanor.models.jax.weight_quantization import QuantizedLinear
 
 SEED = 13
 NBEPOCHS = 150

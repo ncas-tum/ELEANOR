@@ -3,6 +3,17 @@ data
 jupyter_execute
 .vscode
 old
+snnax
+wavesense
+lsm
+federated
+2phase
+paper
+gradients
+results
+results2
+*.db
+log*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

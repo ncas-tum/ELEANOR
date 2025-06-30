@@ -11,15 +11,14 @@ import equinox as eqx
 import jax.numpy as jnp
 import snnax.snn as snn
 import jax.random as jrandom
-import optuna.storages.journal
 from chex import Array, PRNGKey
 from tqdm import trange
 from snnax.snn.layers.stateful import StateShape, StatefulOutput, default_init_fn
 from snnax.functional.surrogate import SpikeFn, superspike_surrogate
 
-from eleanor.models import Bruno, Heracles
 from eleanor.datasets import shuffle, loadBraille
-from eleanor.weight_quantization import QuantizedLinear
+from eleanor.models.jax import Bruno, Heracles
+from eleanor.models.jax.weight_quantization import QuantizedLinear
 
 NBEPOCHS = 150
 BATCHSIZE_TRAIN = 128  # 4320
@@ -314,7 +313,7 @@ study = optuna.load_study(
     storage=storage, study_name=f"{args.quantization}bit {args.model}"
 )
 
-logdir = f"results/{args.quantization}bit_{args.model}"
+logdir = f"results_new/{args.quantization}bit_{args.model}"
 if not os.path.exists(logdir):
     os.makedirs(logdir)
 

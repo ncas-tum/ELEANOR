@@ -1,2 +1,2 @@
 # pip install -e snnax/
-pip install -e ".[dev,cuda]"
+pip install --no-build-isolation -e ".[dev,cuda]"
