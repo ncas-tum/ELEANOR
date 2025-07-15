@@ -47,10 +47,12 @@ def get_extensions():
 
     this_dir = os.path.dirname(os.path.curdir)
     extensions_dir = os.path.join(this_dir, library_name, "models", "torch", "csrc")
-    sources = list(glob.glob(os.path.join(extensions_dir, "*.cpp")))
+    sources = list(glob.glob(os.path.join(extensions_dir, "**/*.cpp"), recursive=True))
 
-    extensions_cuda_dir = os.path.join(extensions_dir, "cuda")
-    cuda_sources = list(glob.glob(os.path.join(extensions_cuda_dir, "*.cu")))
+    # extensions_cuda_dir = os.path.join(extensions_dir, "cuda")
+    cuda_sources = list(
+        glob.glob(os.path.join(extensions_dir, "**/*.cu"), recursive=True)
+    )
 
     if use_cuda:
         sources += cuda_sources

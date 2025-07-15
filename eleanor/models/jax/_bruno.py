@@ -200,7 +200,7 @@ class Bruno(StatefulLayer):
         alpha: float = 1.3,
         soft_E: float = 5e-6,
         I_dsc: float = 10e-12,
-        V_thr: float = 2.5,
+        threshold: float = 2.5,
         dt: float = 1e-3,
         paramsScale: float = 1e12,
         variability: float = 0.0,
@@ -241,7 +241,7 @@ class Bruno(StatefulLayer):
             Soft boudary for the electric field, avoid tau to diverge
         I_dsc : float
             Discharge current, set the "dendritic time constant"
-        V_thr : float
+        threshold : float
             Spiking threshold
         variability: float
             Device to device variability of the device and input current.
@@ -291,7 +291,7 @@ class Bruno(StatefulLayer):
         I_dsc = I_dsc * paramsScale
         self.I_dsc = I_dsc
 
-        self.V_thr = V_thr
+        self.V_thr = threshold
 
         k1, k2, k3, k4, k5, k6, k7 = jrand.split(key, 7)
         self.A_var = D2DVar("A", variability, k1)
@@ -503,8 +503,8 @@ class NoBruno(Bruno):
 
         spikes_ref = jax.lax.stop_gradient(s)
         v = (1 - spikes_ref) * v - 1.5 * spikes_ref
-        # p = (1 - spikes_ref) * p - (spikes_ref * P_s)  # 0.05308533)
-        p = (1 - spikes_ref) * p - (spikes_ref * 0.1478602)  # Replicate results
+        p = (1 - spikes_ref) * p - (spikes_ref * P_s)  # 0.05308533)
+        # p = (1 - spikes_ref) * p - (spikes_ref * 0.1478602)  # Legacy
         s = self.spike_fn(v - self.V_thr)
 
         state = [v, p, s]

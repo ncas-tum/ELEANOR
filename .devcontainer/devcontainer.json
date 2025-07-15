@@ -6,7 +6,8 @@
 	},
 	"runArgs": [
 		"--gpus=all",
-		"--privileged"
+		"--privileged",
+		"--shm-size=8gb"
 	],
 	"customizations": {
 		// Configure properties specific to VS Code.

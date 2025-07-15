@@ -3,5 +3,5 @@ max-line-length = 80
 extend-select = B950
 extend-ignore = E203,E501,E701
 exclude =
-    dev,
+    dev,ToStore
 per-file-ignores = __init__.py:F401
