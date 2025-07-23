@@ -224,13 +224,13 @@ class Heracles(StatefulLayer):
     ) -> Tuple[Sequence[Array], Sequence[Array]]:
         v, p, spikes = state
 
-        # Gradient clipping of the probability due to exponential of k_plus
+        # Gradient clipping of the probability due to exponential of k_down/up
         @jax.custom_gradient
-        def calcDp(k_plus, prob):
-            dp = k_plus * (1 - prob)
+        def calcDp(k_down, k_up, prob):
+            dp = k_down * (1 - prob) + k_up * prob
 
             def gradient(g):
-                return (g * (1 - prob), -g * k_plus * 1e-5)
+                return (g * (1 - prob), g * prob, -g * k_down * 1e-5)
 
             return dp, gradient
 
@@ -279,10 +279,12 @@ class Heracles(StatefulLayer):
 
             E = v * cap_divider - p * depol_divider
             w_e = (E - self.e_off) * self.d_e
-            w_exp = jnp.exp(-(self.w_b - w_e) * self._q / self._k / self.temp)
-            k_plus = self._k * self.temp / self._h * w_exp
+            w_exp_down = jnp.exp(-(self.w_b - w_e) * self._q / self._k / self.temp)
+            k_down = self._k * self.temp / self._h * w_exp_down
+            w_exp_up = jnp.exp(-(self.w_b + w_e) * self._q / self._k / self.temp)
+            k_up = self._k * self.temp / self._h * w_exp_up
 
-            dp = 2 * P_s * calcDp(k_plus, prob)
+            dp = 2 * P_s * calcDp(k_down, k_up, prob)
             I_p = dp * A
 
             # FeLIF
