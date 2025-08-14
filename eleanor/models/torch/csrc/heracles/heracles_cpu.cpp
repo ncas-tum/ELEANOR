@@ -55,7 +55,7 @@ namespace eleanor
         for (int64_t neuron = 0; neuron < v.numel(); neuron++)
         {
             float E, I_p_new, I_leak, dp, dv;
-            float prob, e_dummy, w_depl_d, w_depl_u, w_depl, C_tot, cap_divider, depol_divider, w_e, w_exp, k_plus;
+            float prob, e_dummy, w_depl_d, w_depl_u, w_depl, C_tot, cap_divider, depol_divider, w_e, w_exp_down, w_exp_up, k_down, k_up;
             float v_tmp = v_ptr[neuron];
             float p_tmp = p_ptr[neuron];
             // float v_new, p_new;
@@ -81,10 +81,12 @@ namespace eleanor
                 // FeLIF equation
                 E = v_tmp * cap_divider - p_tmp * depol_divider;
                 w_e = (E - e_off) * d_e;
-                w_exp = std::exp(-(w_b - w_e) * _q / _k / temp);
-                k_plus = _k * temp / _h * w_exp;
+                w_exp_down = std::exp(-(w_b - w_e) * _q / _k / temp);
+                k_down = _k * temp / _h * w_exp_down;
+                w_exp_up = std::exp(-(w_b + w_e) * _q / _k / temp);
+                k_up = _k * temp / _h * w_exp_up;
 
-                dp = 2 * P_s * k_plus * (1 - prob);
+                dp = 2 * P_s * k_down * (1 - prob) - k_up * prob;
 
                 I_p_new = dp * A;
                 I_leak = (I_0 * A * std::expm1(v_tmp / V_t) + I_dsc) * std::copysign(1.0, v_tmp);

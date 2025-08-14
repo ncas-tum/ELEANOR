@@ -17,7 +17,7 @@ namespace eleanor
                                     float threshold, float dt, float paramsScale)
     {
         float E, I_p_new, I_leak, dp, dv;
-        float prob, e_dummy, w_depl_d, w_depl_u, w_depl, C_tot, cap_divider, depol_divider, w_e, w_exp, k_plus;
+        float prob, e_dummy, w_depl_d, w_depl_u, w_depl, C_tot, cap_divider, depol_divider, w_e, w_exp_down, k_down, w_exp_up, k_up;
 
         int idx = blockIdx.x * blockDim.x + threadIdx.x;
         if (idx < numel)
@@ -45,10 +45,12 @@ namespace eleanor
 
                 E = v_tmp * cap_divider - p_tmp * depol_divider;
                 w_e = (E - e_off) * d_e;
-                w_exp = exp(-(w_b - w_e) * _q / _k / temp);
-                k_plus = _k * temp / _h * w_exp;
+                w_exp_down = exp(-(w_b - w_e) * _q / _k / temp);
+                k_down = _k * temp / _h * w_exp_down;
+                w_exp_up = exp(-(w_b + w_e) * _q / _k / temp);
+                k_up = _k * temp / _h * w_exp_up;
 
-                dp = 2 * P_s * k_plus * (1 - prob);
+                dp = 2 * P_s * k_down * (1 - prob) - k_up * prob;
 
                 I_p_new = dp * A;
                 I_leak = (I_0 * A * expm1(v_tmp / V_t) + I_dsc) * copysign(1.0, v_tmp);

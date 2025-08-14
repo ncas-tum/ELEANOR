@@ -13,6 +13,14 @@ from eleanor.models.jax.variability import D2DVar
 _spike_fn = superspike_surrogate(10.0)
 
 
+@jax.custom_gradient
+def _scale_grad(x):
+    def gradient(g):
+        return 1e-3 * g
+
+    return x, gradient
+
+
 class Heracles(StatefulLayer):
     """
     Implementation of Heracles neural model [2]_
@@ -218,80 +226,75 @@ class Heracles(StatefulLayer):
         init_state_spk = jnp.zeros(shape)
         return [init_state_vol, init_state_pol, init_state_spk]
 
+    def calculate_params(self, v, p, A, n_depl, P_s, t_fe):
+        prob = p / 2 / P_s + 0.5
+        e_dummy = v / t_fe
+        w_depl_d = (
+            (self._eps0 * self.eps_fe * e_dummy + self.q_fix_depl)
+            * self.paramsScale
+            / self._q
+            / n_depl
+        )
+        w_depl_u = jnp.abs(
+            (self._eps0 * self.eps_fe * e_dummy - self.q_fix_depl)
+            * self.paramsScale
+            / self._q
+            / n_depl
+        )
+        w_depl = w_depl_d * w_depl_u / (prob * w_depl_u + (1 - prob) * w_depl_d)
+        C_tot = 1 / (
+            1 / (self.C_fe + self.C_par) + 1 / (self._eps0 * self.eps_depl / w_depl * A)
+        )
+        cap_divider = self.eps_depl / (t_fe * self.eps_depl + w_depl * self.eps_fe)
+        depol_divider = (
+            1 / self._eps0 * w_depl / (t_fe * self.eps_depl + w_depl * self.eps_fe)
+        )
+
+        C_tot = jax.lax.stop_gradient(C_tot)
+        cap_divider = jax.lax.stop_gradient(cap_divider)
+        depol_divider = jax.lax.stop_gradient(depol_divider)
+
+        return prob, C_tot, cap_divider, depol_divider
+
     @jax.named_scope("eleanor.models.jax.Heracles")
     def __call__(
         self, state: Array, synaptic_input: Array, *, key: Optional[PRNGKey] = None
     ) -> Tuple[Sequence[Array], Sequence[Array]]:
         v, p, spikes = state
 
-        # Gradient clipping of the probability due to exponential of k_down/up
-        @jax.custom_gradient
-        def calcDp(k_down, k_up, prob):
-            dp = k_down * (1 - prob) + k_up * prob
-
-            def gradient(g):
-                return (g * (1 - prob), g * prob, -g * k_down * 1e-5)
-
-            return dp, gradient
-
         A = self.A_var(self.A, v.shape)
         n_depl = self.n_depl_var(self.n_depl, v.shape)
         P_s = self.P_s_var(self.P_s, v.shape)
         t_fe = self.t_fe_var(self.t_fe, v.shape)
 
-        def calculate_params(v, p, A, n_depl, P_s, t_fe):
-            prob = p / 2 / P_s + 0.5
-            e_dummy = v / t_fe
-            w_depl_d = (
-                (self._eps0 * self.eps_fe * e_dummy + self.q_fix_depl)
-                * self.paramsScale
-                / self._q
-                / n_depl
-            )
-            w_depl_u = jnp.abs(
-                (self._eps0 * self.eps_fe * e_dummy - self.q_fix_depl)
-                * self.paramsScale
-                / self._q
-                / n_depl
-            )
-            w_depl = w_depl_d * w_depl_u / (prob * w_depl_u + (1 - prob) * w_depl_d)
-            C_tot = 1 / (
-                1 / (self.C_fe + self.C_par)
-                + 1 / (self._eps0 * self.eps_depl / w_depl * A)
-            )
-            cap_divider = self.eps_depl / (t_fe * self.eps_depl + w_depl * self.eps_fe)
-            depol_divider = (
-                1 / self._eps0 * w_depl / (t_fe * self.eps_depl + w_depl * self.eps_fe)
-            )
-
-            C_tot = jax.lax.stop_gradient(C_tot)
-            cap_divider = jax.lax.stop_gradient(cap_divider)
-            depol_divider = jax.lax.stop_gradient(depol_divider)
-
-            return prob, C_tot, cap_divider, depol_divider
-
         def step(state, synaptic_input, int_div=1):
-            v, p, s, A, n_depl, P_s, t_fe = state
+            v, p, s, A, n_depl, P_s, t_fe, _, _ = state
 
-            prob, C_tot, cap_divider, depol_divider = calculate_params(
+            prob, C_tot, cap_divider, depol_divider = self.calculate_params(
                 v, p, A, n_depl, P_s, t_fe
             )
 
             E = v * cap_divider - p * depol_divider
             w_e = (E - self.e_off) * self.d_e
-            w_exp_down = jnp.exp(-(self.w_b - w_e) * self._q / self._k / self.temp)
+            w_exp_down = jnp.exp(
+                -jax.nn.relu(self.w_b - w_e) * self._q / self._k / self.temp
+            )
             k_down = self._k * self.temp / self._h * w_exp_down
-            w_exp_up = jnp.exp(-(self.w_b + w_e) * self._q / self._k / self.temp)
+            w_exp_up = jnp.exp(
+                -jax.nn.relu(self.w_b + w_e) * self._q / self._k / self.temp
+            )
             k_up = self._k * self.temp / self._h * w_exp_up
 
-            dp = 2 * P_s * calcDp(k_down, k_up, prob)
-            I_p = dp * A
+            dp = 2 * P_s * k_down * (1 - prob) - k_up * prob
+            I_p = _scale_grad(dp * A)
 
             # FeLIF
-            I_leak = (self.I_0 * A * jnp.expm1(v / self.V_t) + self.I_dsc) * jnp.sign(v)
+            I_leak = jax.lax.stop_gradient(
+                self.I_0 * A * jnp.expm1(v / self.V_t) + self.I_dsc
+            ) * jnp.sign(v)
             dv = (synaptic_input - I_leak - I_p) / C_tot
 
-            v_new = jnp.clip(v + int_div * self.dt * dv, 0.0, 3.5)
+            v_new = jnp.clip(v + int_div * self.dt * dv, -5, 5)
             p_new = jnp.clip(p + int_div * self.dt * dp, -P_s, P_s)
 
             spikes_ref = jax.lax.stop_gradient(s)
@@ -299,15 +302,35 @@ class Heracles(StatefulLayer):
             p = (1 - spikes_ref) * p_new + spikes_ref * p
             s = self.spike_fn(v - self.threshold)
 
-            return (v, p, s, A, n_depl, P_s, t_fe), None
+            return (
+                v,
+                p,
+                s,
+                A,
+                n_depl,
+                P_s,
+                t_fe,
+                I_leak,
+                k_down * (1 - prob) - k_up * prob,
+            ), None
 
-        step_state = (v, p, jnp.zeros_like(p), A, n_depl, P_s, t_fe)
-        (v_inner, p_inner, _, _, _, _, _), _ = jax.lax.scan(
+        step_state = (
+            v,
+            p,
+            jnp.zeros_like(p),
+            A,
+            n_depl,
+            P_s,
+            t_fe,
+            jnp.zeros_like(t_fe),
+            jnp.zeros_like(t_fe),
+        )
+        (v_inner, p_inner, _, _, _, _, _, k_down, k_up), _ = jax.lax.scan(
             partial(step, int_div=1e-3),
             step_state,
             jnp.repeat(synaptic_input[None, ...], 1000, axis=0),
         )
-        (v_outer, p_outer, _, _, _, _, _), _ = step(
+        (v_outer, p_outer, _, _, _, _, _, _, _), _ = step(
             step_state, synaptic_input, int_div=1
         )
 
@@ -321,4 +344,4 @@ class Heracles(StatefulLayer):
         # Calculate spike
         spikes = self.spike_fn(v_new - self.threshold)
         state = [v_new, p_new, spikes]
-        return [state, [spikes, v_new, p_new]]
+        return [state, [spikes, v_new, p_new, k_down, k_up]]

@@ -1,13 +1,16 @@
 {
 	"name": "Python 3",
-	"image": "ferqui/devenv",
+	// "image": "ferqui/devenv",
+	"build": {
+		"dockerfile": "Dockerfile"
+	},
 	"hostRequirements": {
 		"gpu": "optional"
 	},
 	"runArgs": [
 		"--gpus=all",
 		"--privileged",
-		"--shm-size=8gb"
+		"--shm-size=12gb"
 	],
 	"customizations": {
 		// Configure properties specific to VS Code.
