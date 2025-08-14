@@ -50,7 +50,7 @@ namespace eleanor
                 w_exp_up = exp(-(w_b + w_e) * _q / _k / temp);
                 k_up = _k * temp / _h * w_exp_up;
 
-                dp = 2 * P_s * k_down * (1 - prob) - k_up * prob;
+                dp = 2 * P_s * (k_down * (1 - prob) - k_up * prob);
 
                 I_p_new = dp * A;
                 I_leak = (I_0 * A * expm1(v_tmp / V_t) + I_dsc) * copysign(1.0, v_tmp);
@@ -63,10 +63,10 @@ namespace eleanor
                     p_tmp = p_tmp + 0.001 * dt * dp;
                 }
 
-                if (v_tmp > 5)
-                    v_tmp = 5;
-                else if (v_tmp < 0)
-                    v_tmp = 0;
+                if (v_tmp > 4)
+                    v_tmp = 4;
+                else if (v_tmp < -1)
+                    v_tmp = -1;
 
                 if (p_tmp > P_s)
                     p_tmp = P_s;
