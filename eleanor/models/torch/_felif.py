@@ -1,8 +1,11 @@
+from typing import Sequence
+
 import numpy as np
 import torch
 from snntorch import SpikingNeuron
 
 from ._surrogate import tau_surr
+from .variability import D2DVar
 
 
 class FeLIF(SpikingNeuron):
@@ -18,6 +21,7 @@ class FeLIF(SpikingNeuron):
         tau_alpha: float = 1.3,
         E_a: float = 1.0,
         soft_E: float = 1e-18,
+        variability: float = 0.0,
         spike_grad=None,
         surrogate_disable=False,
         init_hidden=False,
@@ -58,6 +62,12 @@ class FeLIF(SpikingNeuron):
         self._register_buffer("tau_p", tau_p, False)
         self._register_buffer("dt", dt, False)
 
+        self.P_s_var = D2DVar("P_s", variability)
+        self.alpha_var = D2DVar("alpha", variability)
+        self.beta_var = D2DVar("beta", variability)
+        self.gamma_var = D2DVar("gamma", variability)
+        self.tau_p_var = D2DVar("tau_p", variability)
+
         self._init_mem()
 
         if self.reset_mechanism_val == 0:  # reset by subtraction
@@ -68,6 +78,13 @@ class FeLIF(SpikingNeuron):
             self.state_function = self._base_int
 
         self.reset_delay = reset_delay
+
+    def update_variability(self, shape: Sequence[int]) -> None:
+        self.P_s_var.update_variability(shape)
+        self.alpha_var.update_variability(shape)
+        self.beta_var.update_variability(shape)
+        self.gamma_var.update_variability(shape)
+        self.tau_p_var.update_variability(shape)
 
     def _register_buffer(self, name: str, param: torch.Tensor, learn: bool):
         if not isinstance(param, torch.Tensor):
@@ -139,13 +156,23 @@ class FeLIF(SpikingNeuron):
     def _base_state_function(self, input_):
         v, p = self.mem, self.pol
 
-        gamma = self.gamma.clamp(0, 1)
+        if len(v.shape) > 1:  # In case does not have batch
+            shape = (1,) + v.shape[1:]
+        else:
+            shape = v.shape
+        P_s = self.P_s_var(self.P_s, shape)
+        alpha = self.alpha_var(self.alpha, shape)
+        beta = self.beta_var(self.beta, shape)
+        gamma = self.gamma_var(self.gamma, shape)
+        tau_p = self.tau_p_var(self.tau_p, shape)
 
-        E = v * self.alpha - p * self.beta
-        tau = self.tau_surr_fn(E, self.tau_p)
+        gamma = gamma.clamp(0, 1)
+
+        E = v * alpha - p * beta
+        tau = self.tau_surr_fn(E, tau_p)
         gamma_p = torch.exp(-self.dt * tau)
 
-        Ip = self.P_s * (torch.sign(E) - p) * self.dt * tau
+        Ip = P_s * (torch.sign(E) - p) * self.dt * tau
 
         base_fn_pol = gamma_p * p + (1 - gamma_p) * torch.sign(E)
         base_fn_mem = gamma * v - (1 - gamma) * Ip + input_

@@ -8,6 +8,16 @@ from .variability import D2DVar
 __all__ = ["Heracles"]
 
 
+class _scale_grad(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x):
+        return x
+
+    @staticmethod
+    def backward(ctx, grad_output) -> None:
+        return 1e-3 * grad_output
+
+
 @torch.library.register_fake("eleanor::heracles")
 def _(
     synaptic_input: Tensor,
@@ -54,9 +64,9 @@ def _backward(ctx, grads):
     I, v, p = ctx.saved_tensors
 
     return (
-        grad_v_out,
-        grad_v_out,
-        grad_p_out,
+        torch.zeros_like(grad_v_out),
+        torch.zeros_like(grad_v_out),
+        torch.zeros_like(grad_p_out),
         None,
         None,
         None,
@@ -260,7 +270,53 @@ class Heracles(SpikingNeuron):
         n_depl: float,
         P_s: float,
     ) -> None:
-        return torch.ops.eleanor.heracles.default(
+        prob = p / 2 / P_s + 0.5
+        e_dummy = v / t_fe
+        w_depl_d = (
+            (self._eps0 * self.eps_fe * e_dummy + self.q_fix_depl)
+            * self.paramsScale
+            / self._q
+            / n_depl
+        )
+        w_depl_u = torch.abs(
+            (self._eps0 * self.eps_fe * e_dummy - self.q_fix_depl)
+            * self.paramsScale
+            / self._q
+            / n_depl
+        )
+        w_depl = w_depl_d * w_depl_u / (prob * w_depl_u + (1 - prob) * w_depl_d)
+        C_tot = 1 / (
+            1 / (self.C_fe + self.C_par) + 1 / (self._eps0 * self.eps_depl / w_depl * A)
+        )
+        cap_divider = self.eps_depl / (t_fe * self.eps_depl + w_depl * self.eps_fe)
+        depol_divider = (
+            1 / self._eps0 * w_depl / (t_fe * self.eps_depl + w_depl * self.eps_fe)
+        )
+
+        E = v * cap_divider - p * depol_divider
+        w_e = (E - self.e_off) * self.d_e
+        w_exp_down = torch.exp(
+            -torch.nn.functional.relu(self.w_b - w_e) * self._q / self._k / self.temp
+        )
+        k_down = self._k * self.temp / self._h * w_exp_down
+        w_exp_up = torch.exp(
+            -torch.nn.functional.relu(self.w_b + w_e) * self._q / self._k / self.temp
+        )
+        k_up = self._k * self.temp / self._h * w_exp_up
+
+        dp = _scale_grad.apply(2 * P_s * (k_down * (1 - prob) - k_up * prob))
+        I_p = dp * A
+
+        # FeLIF
+        I_leak = torch.detach(
+            self.I_0 * A * torch.expm1(v / self.V_t) + self.I_dsc
+        ) * torch.sign(v)
+        dv = (input_ - I_leak - I_p) / C_tot
+
+        mem_out = torch.clip(v + self.dt * dv, -1, 4)
+        pol_out = torch.clip(p + self.dt * dp, -P_s, P_s)
+
+        mem, pol = torch.ops.eleanor.heracles.default(
             input_,
             v,
             p,
@@ -289,6 +345,8 @@ class Heracles(SpikingNeuron):
             self.dt,
             self.paramsScale,
         )
+
+        return mem_out + (mem - mem_out).detach(), pol_out + (pol - pol_out).detach()
 
     def forward(self, input_, pol=None, mem=None):
         if pol is not None:
@@ -344,10 +402,14 @@ class Heracles(SpikingNeuron):
     def _base_state_function(self, input_):
         v, p = self.mem, self.pol
 
-        A = self.A_var(self.A, v.shape)
-        n_depl = self.n_depl_var(self.n_depl, v.shape)
-        P_s = self.P_s_var(self.P_s, v.shape)
-        t_fe = self.t_fe_var(self.t_fe, v.shape)
+        if len(v.shape) > 1:  # In case does not have batch
+            shape = (1,) + v.shape[1:]
+        else:
+            shape = v.shape
+        A = self.A_var(self.A, shape)
+        n_depl = self.n_depl_var(self.n_depl, shape)
+        P_s = self.P_s_var(self.P_s, shape)
+        t_fe = self.t_fe_var(self.t_fe, shape)
 
         mem, pol = self.heracles_step(
             input_,
