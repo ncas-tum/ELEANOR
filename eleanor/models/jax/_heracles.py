@@ -285,8 +285,8 @@ class Heracles(StatefulLayer):
             )
             k_up = self._k * self.temp / self._h * w_exp_up
 
-            dp = 2 * P_s * k_down * (1 - prob) - k_up * prob
-            I_p = _scale_grad(dp * A)
+            dp = _scale_grad(2 * P_s * (k_down * (1 - prob) - k_up * prob))
+            I_p = dp * A
 
             # FeLIF
             I_leak = jax.lax.stop_gradient(

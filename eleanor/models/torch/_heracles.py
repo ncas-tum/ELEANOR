@@ -1,4 +1,5 @@
-import numpy as np
+from typing import Sequence
+
 import torch
 from torch import Tensor
 from snntorch import SpikingNeuron
@@ -38,7 +39,6 @@ def _(
     V_t: float,
     C_par: float,
     C_fe: float,
-    C_tot_init: float,
     I_dsc: float,
     _eps0: float,
     _q: float,
@@ -47,6 +47,7 @@ def _(
     threshold: float,
     dt: float,
     paramsScale: float,
+    nsteps: int,
 ) -> None:
     torch._check(synaptic_input.shape == v.shape)
     torch._check(p.shape == v.shape)
@@ -85,6 +86,7 @@ def _backward(ctx, grads):
 
 
 def _setup_context(ctx, inputs, output):
+    """Setup context for backward pass"""
     (
         synaptic_input,
         v,
@@ -104,7 +106,6 @@ def _setup_context(ctx, inputs, output):
         V_t,
         C_par,
         C_fe,
-        C_tot_init,
         I_dsc,
         _eps0,
         _q,
@@ -113,8 +114,10 @@ def _setup_context(ctx, inputs, output):
         threshold,
         dt,
         paramsScale,
+        nsteps,
     ) = inputs
 
+    # Save tensors for backward
     ctx.save_for_backward(synaptic_input, v, p)
 
 
@@ -145,6 +148,7 @@ class Heracles(SpikingNeuron):
         dt: float = 1e-3,
         paramsScale: float = 1e12,
         variability: float = 0.0,
+        nsteps: int = 1000,
         spike_grad=None,
         surrogate_disable=False,
         init_hidden=False,
@@ -188,18 +192,7 @@ class Heracles(SpikingNeuron):
         _q = 1.60217663e-19 * paramsScale
         _k = 1.380649e-23 * paramsScale  # Boltzmann constant
         _h = 6.62607015e-34 * paramsScale  # Planck constant
-
-        # Initial values, to be checked whether sensible
-        e_dummy = 0
-        prob = 0
-
         C_fe = _eps0 * eps_fe / t_fe * A
-        w_depl_d = (_eps0 * eps_fe * e_dummy + q_fix_depl) * paramsScale / _q / n_depl
-        w_depl_u = np.abs(
-            (_eps0 * eps_fe * e_dummy - q_fix_depl) * paramsScale / _q / n_depl
-        )
-        w_depl = w_depl_d * w_depl_u / (prob * w_depl_u + (1 - prob) * w_depl_d)
-        C_tot_init = 1 / (1 / (C_fe + C_par) + 1 / (_eps0 * eps_depl / w_depl * A))
 
         self._register_buffer("A", A, False)
         self._register_buffer("t_fe", t_fe, False)
@@ -216,7 +209,6 @@ class Heracles(SpikingNeuron):
         self._register_buffer("V_t", V_t, False)
         self._register_buffer("C_par", C_par, False)
         self._register_buffer("C_fe", C_fe, False)
-        self._register_buffer("C_tot_init", C_tot_init, False)
         self._register_buffer("I_dsc", I_dsc, False)
         self._register_buffer("paramsScale", paramsScale, False)
         self._register_buffer("dt", dt, False)
@@ -224,6 +216,7 @@ class Heracles(SpikingNeuron):
         self._register_buffer("_q", _q, False)
         self._register_buffer("_k", _k, False)
         self._register_buffer("_h", _h, False)
+        self._register_buffer("nsteps", nsteps, False)
 
         self.A_var = D2DVar("A", variability)
         self.n_depl_var = D2DVar("n_depl", variability)
@@ -240,6 +233,12 @@ class Heracles(SpikingNeuron):
             self.state_function = self._base_int
 
         self.reset_delay = reset_delay
+
+    def update_variability(self, shape: Sequence[int]) -> None:
+        self.A_var.update_variability(shape)
+        self.n_depl_var.update_variability(shape)
+        self.P_s_var.update_variability(shape)
+        self.t_fe_var.update_variability(shape)
 
     def _register_buffer(self, name: str, param: torch.Tensor, learn: bool):
         if not isinstance(param, torch.Tensor):
@@ -260,6 +259,90 @@ class Heracles(SpikingNeuron):
         )
         return self.pol, self.mem
 
+    @property
+    def C_tot(self):
+        A = self.A_var(self.A, self.mem.shape)
+        n_depl = self.n_depl_var(self.n_depl, self.mem.shape)
+        t_fe = self.t_fe_var(self.t_fe, self.mem.shape)
+
+        prob = self.pol / (2 * self.P_s) + 0.5
+        e_dummy = self.mem / t_fe
+
+        w_depl_d = (
+            (self._eps0 * self.eps_fe * e_dummy + self.q_fix_depl)
+            * self.paramsScale
+            / self._q
+            / n_depl
+        )
+        w_depl_u = torch.abs(
+            (self._eps0 * self.eps_fe * e_dummy - self.q_fix_depl)
+            * self.paramsScale
+            / self._q
+            / n_depl
+        )
+        w_depl = w_depl_d * w_depl_u / (prob * w_depl_u + (1 - prob) * w_depl_d)
+        C_tot = 1 / (
+            1 / (self.C_fe + self.C_par) + 1 / (self._eps0 * self.eps_depl / w_depl * A)
+        )
+        return C_tot
+
+    @property
+    def I_leak(self):
+        A = self.A_var(self.A, self.mem.shape)
+        return (
+            self.I_0 * A * torch.expm1(self.mem / self.V_t) + self.I_dsc
+        ) * torch.sign(self.mem)
+
+    @property
+    def cap_divider(self):
+        t_fe = self.t_fe_var(self.t_fe, self.mem.shape)
+        n_depl = self.n_depl_var(self.n_depl, self.mem.shape)
+
+        prob = self.pol / (2 * self.P_s) + 0.5
+        e_dummy = self.mem / t_fe
+
+        w_depl_d = (
+            (self._eps0 * self.eps_fe * e_dummy + self.q_fix_depl)
+            * self.paramsScale
+            / self._q
+            / n_depl
+        )
+        w_depl_u = torch.abs(
+            (self._eps0 * self.eps_fe * e_dummy - self.q_fix_depl)
+            * self.paramsScale
+            / self._q
+            / n_depl
+        )
+        w_depl = w_depl_d * w_depl_u / (prob * w_depl_u + (1 - prob) * w_depl_d)
+        cap_divider = self.eps_depl / (t_fe * self.eps_depl + w_depl * self.eps_fe)
+        return cap_divider
+
+    @property
+    def depol_divider(self):
+        t_fe = self.t_fe_var(self.t_fe, self.mem.shape)
+        n_depl = self.n_depl_var(self.n_depl, self.mem.shape)
+
+        prob = self.pol / (2 * self.P_s) + 0.5
+        e_dummy = self.mem / t_fe
+
+        w_depl_d = (
+            (self._eps0 * self.eps_fe * e_dummy + self.q_fix_depl)
+            * self.paramsScale
+            / self._q
+            / n_depl
+        )
+        w_depl_u = torch.abs(
+            (self._eps0 * self.eps_fe * e_dummy - self.q_fix_depl)
+            * self.paramsScale
+            / self._q
+            / n_depl
+        )
+        w_depl = w_depl_d * w_depl_u / (prob * w_depl_u + (1 - prob) * w_depl_d)
+        depol_divider = (
+            1 / self._eps0 * w_depl / (t_fe * self.eps_depl + w_depl * self.eps_fe)
+        )
+        return depol_divider
+
     def heracles_step(
         self,
         input_: Tensor,
@@ -270,8 +353,9 @@ class Heracles(SpikingNeuron):
         n_depl: float,
         P_s: float,
     ) -> None:
-        prob = p / 2 / P_s + 0.5
+        prob = p / (2 * P_s) + 0.5
         e_dummy = v / t_fe
+
         w_depl_d = (
             (self._eps0 * self.eps_fe * e_dummy + self.q_fix_depl)
             * self.paramsScale
@@ -316,26 +400,25 @@ class Heracles(SpikingNeuron):
         mem_out = torch.clip(v + self.dt * dv, -1, 4)
         pol_out = torch.clip(p + self.dt * dp, -P_s, P_s)
 
-        mem, pol = torch.ops.eleanor.heracles.default(
+        mem, pol = torch.ops.eleanor.heracles(
             input_,
             v,
             p,
-            A,
-            t_fe,
+            A.repeat(input_.shape[0], 1),
+            t_fe.repeat(input_.shape[0], 1),
             self.eps_fe,
             self.eps_depl,
             self.q_fix_depl,
-            n_depl,
+            n_depl.repeat(input_.shape[0], 1),
             self.e_off,
             self.temp,
             self.w_b,
             self.d_e,
-            P_s,
+            P_s.repeat(input_.shape[0], 1),
             self.I_0,
             self.V_t,
             self.C_par,
             self.C_fe,
-            self.C_tot_init,
             self.I_dsc,
             self._eps0,
             self._q,
@@ -344,6 +427,7 @@ class Heracles(SpikingNeuron):
             self.threshold,
             self.dt,
             self.paramsScale,
+            self.nsteps,
         )
 
         return mem_out + (mem - mem_out).detach(), pol_out + (pol - pol_out).detach()
@@ -361,7 +445,12 @@ class Heracles(SpikingNeuron):
                 "while `init_hidden=True`"
             )
 
-        P_s = self.P_s_var(self.P_s, input_.shape)
+        if len(input_.shape) > 1:  # In case does not have batch
+            shape = (1,) + input_.shape[1:]
+        else:
+            shape = input_.shape
+        P_s = self.P_s_var(self.P_s, shape)
+
         if not self.pol.shape == input_.shape:
             self.pol = torch.zeros_like(input_, device=self.pol.device) - P_s
 
@@ -402,10 +491,10 @@ class Heracles(SpikingNeuron):
     def _base_state_function(self, input_):
         v, p = self.mem, self.pol
 
-        if len(v.shape) > 1:  # In case does not have batch
-            shape = (1,) + v.shape[1:]
+        if len(input_.shape) > 1:  # In case does not have batch
+            shape = (1,) + input_.shape[1:]
         else:
-            shape = v.shape
+            shape = input_.shape
         A = self.A_var(self.A, shape)
         n_depl = self.n_depl_var(self.n_depl, shape)
         P_s = self.P_s_var(self.P_s, shape)
@@ -421,12 +510,18 @@ class Heracles(SpikingNeuron):
             P_s,
         )
 
-        mem = torch.clip(mem, 0, 5)
+        mem = torch.clip(mem, -1, 4)
         pol = torch.clip(pol, -self.P_s, self.P_s)
 
         return pol, mem
 
     def _base_sub(self, input_):
+        if len(input_.shape) > 1:  # In case does not have batch
+            shape = (1,) + input_.shape[1:]
+        else:
+            shape = input_.shape
+        P_s = self.P_s_var(self.P_s, shape)
+
         pol, mem = self._base_state_function(input_)
         P_s = self.P_s_var(self.P_s, pol.shape)
 
@@ -435,12 +530,21 @@ class Heracles(SpikingNeuron):
         return pol, mem
 
     def _base_zero(self, input_):
-        pol, mem = self._base_state_function(input_)
-        pol2, mem2 = self._base_state_function(input_)
-        P_s = self.P_s_var(self.P_s, pol.shape)
+        if len(input_.shape) > 1:  # In case does not have batch
+            shape = (1,) + input_.shape[1:]
+        else:
+            shape = input_.shape
+        P_s = self.P_s_var(self.P_s, shape)
 
-        pol -= (pol2 + P_s) * self.reset
-        mem -= mem2 * self.reset
+        pol, mem = self._base_state_function(input_)
+        # pol2, mem2 = self._base_state_function(input_)
+        # pol2 = pol.clone()
+        # mem2 = mem.clone()
+
+        pol = pol * (1 - self.reset) - P_s * self.reset
+        mem = mem * (1 - self.reset)
+        # pol -= (pol2 + P_s) * self.reset
+        # mem -= mem2 * self.reset
         return pol, mem
 
     def _base_int(self, input_):

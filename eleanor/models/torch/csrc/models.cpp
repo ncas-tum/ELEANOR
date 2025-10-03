@@ -29,7 +29,7 @@ namespace eleanor
 {
 TORCH_LIBRARY(eleanor, m) {
   m.def("bruno(Tensor synaptic_input, Tensor v, Tensor p, float cap_divider, float depol_divider, float P_s, float A, float I_0, float E_a, float V_t, float I_dsc, float tau_0, float C_tot, float soft_E, float alpha, float threshold, float dt) -> Tensor[]");
-  m.def("heracles(Tensor synaptic_input, Tensor v, Tensor p, Tensor A, Tensor t_fe, float eps_fe, float eps_depl, float q_fix_depl, Tensor n_depl, float e_off, float temp, float w_b, float d_e, Tensor P_s, float I_0, float V_t, float C_par, float C_fe, float C_tot_init, float I_dsc, float _eps0, float _q, float _k, float _h, float threshold, float dt, float paramsScale) -> Tensor[]");
+  m.def("heracles(Tensor synaptic_input, Tensor v, Tensor p, Tensor A, Tensor t_fe, float eps_fe, float eps_depl, float q_fix_depl, Tensor n_depl, float e_off, float temp, float w_b, float d_e, Tensor P_s, float I_0, float V_t, float C_par, float C_fe, float I_dsc, float _eps0, float _q, float _k, float _h, float threshold, float dt, float paramsScale, int nsteps) -> Tensor[]");
 }
 
 } // namespace name

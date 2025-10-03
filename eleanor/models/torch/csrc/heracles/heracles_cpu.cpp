@@ -14,8 +14,8 @@ namespace eleanor
                                          double q_fix_depl, const at::Tensor & n_depl, double e_off,
                                          double temp, double w_b, double d_e, const at::Tensor & P_s,
                                          double I_0, double V_t, double C_par, double C_fe,
-                                         double C_tot_init, double I_dsc, double _eps0, double _q, double _k, double _h,
-                                         double threshold, double dt, double paramsScale)
+                                         double I_dsc, double _eps0, double _q, double _k, double _h,
+                                         double threshold, double dt, double paramsScale, int64_t nsteps)
     {
         TORCH_CHECK(v.sizes() == synaptic_input.sizes());
         TORCH_CHECK(v.sizes() == p.sizes());
@@ -49,13 +49,18 @@ namespace eleanor
         float *v_result_ptr = v_result.data_ptr<float>();
         float *p_result_ptr = p_result.data_ptr<float>();
 
+        float int_div = 1 / static_cast<float>(nsteps);
+
         // omp_set_num_threads(omp_get_max_threads());
 
 #pragma omp parallel for
         for (int64_t neuron = 0; neuron < v.numel(); neuron++)
         {
             float E, I_p_new, I_leak, dp, dv;
-            float prob, e_dummy, w_depl_d, w_depl_u, w_depl, C_tot, cap_divider, depol_divider, w_e, w_exp_down, w_exp_up, k_down, k_up;
+            float prob, e_dummy;
+            float w_depl_denom, w_depl_d, w_depl_u_signed, w_depl_u, w_depl;
+            float C_tot, cap_divider, depol_divider;
+            float w_e, w_exp_down, w_exp_up, k_down, k_up;
             float v_tmp = v_ptr[neuron];
             float p_tmp = p_ptr[neuron];
             // float v_new, p_new;
@@ -65,14 +70,18 @@ namespace eleanor
             float n_depl = n_depl_ptr[neuron];
             float P_s = P_s_ptr[neuron];
 
-            for (int64_t t = 0; t < 1000; t++)
+            for (int64_t t = 0; t < nsteps; t++)
             {
                 // Calculate cap and depol dividers
                 prob = p_tmp / 2 / P_s + 0.5;
                 e_dummy = v_tmp / t_fe;
+
                 w_depl_d = ((_eps0 * eps_fe * e_dummy + q_fix_depl) * paramsScale / _q / n_depl);
-                w_depl_u = std::abs((_eps0 * eps_fe * e_dummy - q_fix_depl) * paramsScale / _q / n_depl);
-                w_depl = w_depl_d * w_depl_u / (prob * w_depl_u + (1 - prob) * w_depl_d);
+                w_depl_u_signed = (_eps0 * eps_fe * e_dummy - q_fix_depl) * paramsScale / _q / n_depl;
+                w_depl_u = std::abs(w_depl_u_signed);
+
+                w_depl_denom = prob * w_depl_u + (1 - prob) * w_depl_d;
+                w_depl = w_depl_d * w_depl_u / w_depl_denom;
 
                 C_tot = 1 / (1 / (C_fe + C_par) + 1 / (_eps0 * eps_depl / w_depl * A));
                 cap_divider = eps_depl / (t_fe * eps_depl + w_depl * eps_fe);
@@ -95,8 +104,8 @@ namespace eleanor
 
                 if (v_tmp <= threshold)
                 {
-                    v_tmp = v_tmp + 0.001 * dt * dv;
-                    p_tmp = p_tmp + 0.001 * dt * dp;
+                    v_tmp = v_tmp + int_div * dt * dv;
+                    p_tmp = p_tmp + int_div * dt * dp;
                 }
 
                 if (v_tmp > 4)

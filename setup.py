@@ -20,7 +20,7 @@ else:
 
 def get_extensions():
     debug_mode = os.getenv("DEBUG", "0") == "1"
-    use_cuda = os.getenv("USE_CUDA", "1") == "1"
+    use_cuda = os.getenv("USE_CUDA", "1" if torch.cuda.is_available() else "0") == "1"
     print("Compiling")
     if debug_mode:
         print("Compiling in debug mode")

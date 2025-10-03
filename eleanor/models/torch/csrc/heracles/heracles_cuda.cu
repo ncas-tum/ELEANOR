@@ -13,12 +13,12 @@ namespace eleanor
                                     float q_fix_depl, float *n_depl_ptr, float e_off,
                                     float temp, float w_b, float d_e, float *P_s_ptr,
                                     float I_0, float V_t, float C_par, float C_fe,
-                                    float C_tot_init, float I_dsc, float _eps0, float _q, float _k, float _h,
-                                    float threshold, float dt, float paramsScale)
+                                    float I_dsc, float _eps0, float _q, float _k, float _h,
+                                    float threshold, float dt, float paramsScale, int64_t nsteps)
     {
         float E, I_p_new, I_leak, dp, dv;
         float prob, e_dummy, w_depl_d, w_depl_u, w_depl, C_tot, cap_divider, depol_divider, w_e, w_exp_down, k_down, w_exp_up, k_up;
-
+        float int_div = 1/static_cast<float>(nsteps);
         int idx = blockIdx.x * blockDim.x + threadIdx.x;
         if (idx < numel)
         {
@@ -30,7 +30,7 @@ namespace eleanor
             float n_depl = n_depl_ptr[idx];
             float P_s = P_s_ptr[idx];
 
-            for (int64_t t = 0; t < 1000; t++)
+            for (int64_t t = 0; t < nsteps; t++)
             {
                 // Calculate cap and depol dividers
                 prob = p_tmp / 2 / P_s + 0.5;
@@ -59,8 +59,8 @@ namespace eleanor
 
                 if (v_tmp <= threshold)
                 {
-                    v_tmp = v_tmp + 0.001 * dt * dv;
-                    p_tmp = p_tmp + 0.001 * dt * dp;
+                    v_tmp = v_tmp + int_div * dt * dv;
+                    p_tmp = p_tmp + int_div * dt * dp;
                 }
 
                 if (v_tmp > 4)
@@ -84,8 +84,8 @@ namespace eleanor
                                          double q_fix_depl, const at::Tensor &n_depl, double e_off,
                                          double temp, double w_b, double d_e, const at::Tensor &P_s,
                                          double I_0, double V_t, double C_par, double C_fe,
-                                         double C_tot_init, double I_dsc, double _eps0, double _q, double _k, double _h,
-                                         double threshold, double dt, double paramsScale)
+                                         double I_dsc, double _eps0, double _q, double _k, double _h,
+                                         double threshold, double dt, double paramsScale, int64_t nsteps)
     {
         TORCH_CHECK(v.sizes() == synaptic_input.sizes());
         TORCH_CHECK(v.sizes() == p.sizes());
@@ -119,7 +119,7 @@ namespace eleanor
         float *P_s_ptr = P_s_contig.data_ptr<float>();
 
         int numel = v_contig.numel();
-        heracles_kernel<<<(numel + 255) / 256, 256>>>(numel, synaptic_input_ptr, v_ptr, p_ptr, v_result_ptr, p_result_ptr, A_ptr, t_fe_ptr, eps_fe, eps_depl, q_fix_depl, n_depl_ptr, e_off, temp, w_b, d_e, P_s_ptr, I_0, V_t, C_par, C_fe, C_tot_init, I_dsc, _eps0, _q, _k, _h, threshold, dt, paramsScale);
+        heracles_kernel<<<(numel + 255) / 256, 256>>>(numel, synaptic_input_ptr, v_ptr, p_ptr, v_result_ptr, p_result_ptr, A_ptr, t_fe_ptr, eps_fe, eps_depl, q_fix_depl, n_depl_ptr, e_off, temp, w_b, d_e, P_s_ptr, I_0, V_t, C_par, C_fe, I_dsc, _eps0, _q, _k, _h, threshold, dt, paramsScale, nsteps);
 
         return std::vector<at::Tensor>{v_result, p_result};
     }
