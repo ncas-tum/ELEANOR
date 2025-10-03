@@ -348,10 +348,10 @@ class Heracles(SpikingNeuron):
         input_: Tensor,
         v: Tensor,
         p: Tensor,
-        A: float,
-        t_fe: float,
-        n_depl: float,
-        P_s: float,
+        A: Tensor,
+        t_fe: Tensor,
+        n_depl: Tensor,
+        P_s: Tensor,
     ) -> None:
         prob = p / (2 * P_s) + 0.5
         e_dummy = v / t_fe

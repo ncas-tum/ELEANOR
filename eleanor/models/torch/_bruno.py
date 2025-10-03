@@ -1,6 +1,10 @@
+from typing import Sequence
+
 import torch
 from torch import Tensor
 from snntorch import SpikingNeuron
+
+from .variability import D2DVar
 
 __all__ = ["Bruno"]
 
@@ -10,16 +14,16 @@ def _(
     synaptic_input: Tensor,
     v: Tensor,
     p: Tensor,
-    cap_divider: float,
-    depol_divider: float,
-    P_s: float,
-    A: float,
-    I_0: float,
-    E_a: float,
+    cap_divider: Tensor,
+    depol_divider: Tensor,
+    P_s: Tensor,
+    A: Tensor,
+    I_0: Tensor,
+    E_a: Tensor,
     V_t: float,
     I_dsc: float,
     tau_0: float,
-    C_tot: float,
+    C_tot: Tensor,
     soft_E: float,
     alpha: float,
     threshold: float,
@@ -27,9 +31,18 @@ def _(
 ) -> None:
     torch._check(synaptic_input.shape == v.shape)
     torch._check(p.shape == v.shape)
+    torch._check(cap_divider.shape == v.shape)
+    torch._check(depol_divider.shape == v.shape)
+    torch._check(P_s.shape == v.shape)
+    torch._check(A.shape == v.shape)
+    torch._check(I_0.shape == v.shape)
+    torch._check(E_a.shape == v.shape)
+    torch._check(C_tot.shape == v.shape)
+
     torch._check(synaptic_input.dtype == torch.float)
     torch._check(v.dtype == torch.float)
     torch._check(p.dtype == torch.float)
+
     torch._check(synaptic_input.device == v.device)
     torch._check(p.device == v.device)
 
@@ -38,34 +51,33 @@ def _(
 
 def _backward(ctx, grads):
     grad_v_out, grad_p_out = grads
-    I, v, p = ctx.saved_tensors
+    I, v, p, cap_divider, depol_divider, P_s, A, I_0, E_a, C_tot = ctx.saved_tensors
     grad_I, grad_v, grad_p = None, None, None
 
-    E = ctx.cap_divider * v - ctx.depol_divider * p
-    I_pa = ctx.A * (torch.sign(E) * ctx.P_s - p)
+    E = cap_divider * v - depol_divider * p
+    I_pa = A * (torch.sign(E) * P_s - p)
     I_pb = 1 / (
-        ctx.tau_0
-        * torch.exp(torch.pow(ctx.E_a / (torch.abs(E) + ctx.soft_E), ctx.alpha))
+        ctx.tau_0 * torch.exp(torch.pow(E_a / (torch.abs(E) + ctx.soft_E), ctx.alpha))
     )
 
-    exponential = (ctx.E_a / (torch.abs(E) + ctx.soft_E)) ** ctx.alpha
+    exponential = (E_a / (torch.abs(E) + ctx.soft_E)) ** ctx.alpha
     numerator = ctx.alpha * torch.exp(-exponential) * exponential
     denumerator = ctx.tau_0 * ctx.soft_E * torch.abs(E) + ctx.tau_0 * E**2
     denumerator = torch.where(torch.abs(denumerator) > 0, denumerator, 1.0)
     tangent_E = (E * numerator) / denumerator
     tangent_E = tangent_E
 
-    dI_pdp = -ctx.A * I_pb - I_pa * tangent_E * ctx.depol_divider
-    dIldv = ctx.I_0 * ctx.A * torch.exp(v / ctx.V_t) * torch.sign(v) / ctx.V_t
-    dI_pdv = I_pa * tangent_E * ctx.cap_divider
+    dI_pdp = -A * I_pb - I_pa * tangent_E * depol_divider
+    dIldv = I_0 * A * torch.exp(v / ctx.V_t) * torch.sign(v) / ctx.V_t
+    dI_pdv = I_pa * tangent_E * cap_divider
 
-    dvdv = 1 + ctx.dt / ctx.C_tot * (-dIldv - dI_pdv)
-    dvdp = -ctx.dt / ctx.C_tot * dI_pdp
-    dpdv = ctx.dt / ctx.A * ctx.cap_divider * tangent_E * I_pa
-    dpdp = 1 + ctx.dt * dI_pdp / ctx.A
+    dvdv = 1 + ctx.dt / C_tot * (-dIldv - dI_pdv)
+    dvdp = -ctx.dt / C_tot * dI_pdp
+    dpdv = ctx.dt / A * cap_divider * tangent_E * I_pa
+    dpdp = 1 + ctx.dt * dI_pdp / A
 
     if ctx.needs_input_grad[0]:
-        grad_I = grad_v_out * ctx.dt / ctx.C_tot
+        grad_I = grad_v_out * ctx.dt / C_tot
     if ctx.needs_input_grad[1]:
         grad_v = grad_v_out * dvdv + grad_p_out * dpdv
     if ctx.needs_input_grad[2]:
@@ -113,17 +125,10 @@ def _setup_context(ctx, inputs, output):
         dt,
     ) = inputs
 
-    ctx.save_for_backward(I, v, p)
-    ctx.cap_divider = cap_divider
-    ctx.depol_divider = depol_divider
-    ctx.P_s = P_s
-    ctx.A = A
-    ctx.I_0 = I_0
-    ctx.E_a = E_a
+    ctx.save_for_backward(I, v, p, cap_divider, depol_divider, P_s, A, I_0, E_a, C_tot)
     ctx.V_t = V_t
     ctx.I_dsc = I_dsc
     ctx.tau_0 = tau_0
-    ctx.C_tot = C_tot
     ctx.soft_E = soft_E
     ctx.alpha = alpha
     ctx.threshold = threshold
@@ -139,20 +144,21 @@ def bruno_step(
     synaptic_input: Tensor,
     v: Tensor,
     p: Tensor,
-    cap_divider: float,
-    depol_divider: float,
-    P_s: float,
-    A: float,
-    I_0: float,
-    E_a: float,
+    cap_divider: Tensor,
+    depol_divider: Tensor,
+    P_s: Tensor,
+    A: Tensor,
+    I_0: Tensor,
+    E_a: Tensor,
     V_t: float,
     I_dsc: float,
     tau_0: float,
-    C_tot: float,
+    C_tot: Tensor,
     soft_E: float,
     alpha: float,
     threshold: float,
     dt: float,
+    nsteps: int,
 ) -> None:
     return torch.ops.eleanor.bruno.default(
         synaptic_input,
@@ -172,6 +178,7 @@ def bruno_step(
         alpha,
         threshold,
         dt,
+        nsteps,
     )
 
 
@@ -197,6 +204,7 @@ class Bruno(SpikingNeuron):
         dt: float = 1e-3,
         paramsScale: float = 1e12,
         variability: float = 0.0,
+        nsteps: int = 1000,
         spike_grad=None,
         surrogate_disable=False,
         init_hidden=False,
@@ -231,29 +239,34 @@ class Bruno(SpikingNeuron):
         soft_E /= paramsScale
         I_dsc *= paramsScale
 
-        _eps0 = 8.85418792394420013968e-12 * paramsScale
-
-        C_0 = _eps0 * eps_hzo / t_hzo * A
-        C_tot = C_par + C_0
-
-        cap_divider = eps_int / (t_hzo * eps_int + t_int * eps_hzo)
-        depol_divider = 1 / _eps0 * t_int / (t_hzo * eps_int + t_int * eps_hzo)
-
         params = {
             "A": A,
-            "cap_divider": cap_divider,
-            "depol_divider": depol_divider,
             "P_s": P_s,
             "I_0": I_0,
             "E_a": E_a,
             "V_t": V_t,
             "I_dsc": I_dsc,
             "tau_0": tau_0,
-            "C_tot": C_tot,
             "soft_E": soft_E,
             "alpha": alpha,
             "dt": dt,
+            "variability": variability,
+            "eps_hzo": eps_hzo,
+            "eps_int": eps_int,
+            "C_par": C_par,
+            "t_hzo": t_hzo,
+            "t_int": t_int,
+            "paramsScale": paramsScale,
+            "nsteps": nsteps,
         }
+
+        self.A_var = D2DVar("A", variability)
+        self.E_a_var = D2DVar("E_a", variability)
+        self.P_s_var = D2DVar("P_s", variability)
+        self.I_0_var = D2DVar("I_0", variability)
+        self.Iin_var = D2DVar("Iin", variability)
+        self.t_hzo_var = D2DVar("t_hzo", variability)
+        self.t_int_var = D2DVar("t_int", variability)
 
         self._register_buffer(params)
         self._init_mem()
@@ -267,9 +280,19 @@ class Bruno(SpikingNeuron):
 
         self.reset_delay = reset_delay
 
+    def update_variability(self, shape: Sequence[int]) -> None:
+        self.A_var.update_variability(shape)
+        self.E_a_var.update_variability(shape)
+        self.P_s_var.update_variability(shape)
+        self.I_0_var.update_variability(shape)
+        self.Iin_var.update_variability(shape)
+        self.t_hzo_var.update_variability(shape)
+        self.t_int_var.update_variability(shape)
+
     def _register_buffer(self, params):
         for param_name, val in params.items():
-            val = torch.as_tensor(val)
+            if not isinstance(val, torch.Tensor):
+                val = torch.as_tensor(val)
             self.register_buffer(param_name, val)
 
     def _init_mem(self):
@@ -281,8 +304,9 @@ class Bruno(SpikingNeuron):
 
     def reset_mem(self):
         self.mem = torch.zeros_like(self.mem, device=self.mem.device)
-        self.pol = torch.zeros_like(self.pol, device=self.pol.device) - self.P_s
-
+        self.pol = torch.zeros_like(self.pol, device=self.pol.device) - self.P_s_var(
+            self.P_s, self.pol.shape
+        )
         return self.pol, self.mem
 
     def forward(self, input_, pol=None, mem=None):
@@ -297,8 +321,15 @@ class Bruno(SpikingNeuron):
                 "`mem` or `pol` should not be passed as an argument "
                 "while `init_hidden=True`"
             )
+
+        if len(input_.shape) > 1:  # In case does not have batch
+            shape = (1,) + input_.shape[1:]
+        else:
+            shape = input_.shape
+        P_s = self.P_s_var(self.P_s, shape)
+
         if not self.pol.shape == input_.shape:
-            self.pol = torch.zeros_like(input_, device=self.pol.device) - self.P_s
+            self.pol = torch.zeros_like(input_, device=self.pol.device) - P_s
 
         if not self.mem.shape == input_.shape:
             self.mem = torch.zeros_like(input_, device=self.mem.device)
@@ -325,7 +356,7 @@ class Bruno(SpikingNeuron):
                 self.pol = self.pol - do_reset * 2
             elif self.reset_mechanism_val == 1:  # reset to zero
                 self.mem = self.mem - do_reset * self.mem
-                self.pol = self.pol - do_reset * (self.P_s + self.pol)
+                self.pol = self.pol - do_reset * (P_s + self.pol)
 
         if self.output:
             return spk, self.pol, self.mem
@@ -335,42 +366,77 @@ class Bruno(SpikingNeuron):
             return self.reset, self.pol, self.mem
 
     def _base_state_function(self, input_):
+        if len(input_.shape) > 1:  # In case does not have batch
+            shape = (1,) + input_.shape[1:]
+        else:
+            shape = input_.shape
+        P_s = self.P_s_var(self.P_s, shape)
+        A = self.A_var(self.A, shape)
+        E_a = self.E_a_var(self.E_a, shape)
+        I_0 = self.I_0_var(self.I_0, shape)
+        t_hzo = self.t_hzo_var(self.t_hzo, shape)
+        t_int = self.t_int_var(self.t_int, shape)
+        synaptic_input = self.Iin_var(input_, shape)
+
+        _eps0 = 8.85418792394420013968e-12 * self.paramsScale
+
+        C_0 = _eps0 * self.eps_hzo / t_hzo * A
+        C_tot = self.C_par + C_0
+
+        cap_divider = self.eps_int / (t_hzo * self.eps_int + t_int * self.eps_hzo)
+        depol_divider = (
+            1 / _eps0 * t_int / (t_hzo * self.eps_int + t_int * self.eps_hzo)
+        )
+
         mem, pol = bruno_step(
-            input_,
+            synaptic_input,
             self.mem,
             self.pol,
-            self.cap_divider,
-            self.depol_divider,
-            self.P_s,
-            self.A,
-            self.I_0,
-            self.E_a,
+            cap_divider,
+            depol_divider,
+            P_s,
+            A,
+            I_0,
+            E_a,
             self.V_t,
             self.I_dsc,
             self.tau_0,
-            self.C_tot,
+            C_tot,
             self.soft_E,
             self.alpha,
             self.threshold,
             self.dt,
+            self.nsteps,
         )
         mem = torch.clip(mem, -5, 5)
-        pol = torch.clip(pol, -self.P_s, self.P_s)
+        pol = torch.clip(pol, -P_s, P_s)
 
         return pol, mem
 
     def _base_sub(self, input_):
+        if len(input_.shape) > 1:  # In case does not have batch
+            shape = (1,) + input_.shape[1:]
+        else:
+            shape = input_.shape
+        P_s = self.P_s_var(self.P_s, shape)
+
         pol, mem = self._base_state_function(input_)
 
         mem = mem - self.reset * self.threshold
-        pol = pol - self.reset * 2 * self.P_s
+        pol = pol - self.reset * 2 * P_s
         return pol, mem
 
     def _base_zero(self, input_):
+        if len(input_.shape) > 1:  # In case does not have batch
+            shape = (1,) + input_.shape[1:]
+        else:
+            shape = input_.shape
+        P_s = self.P_s_var(self.P_s, shape)
+
         pol, mem = self._base_state_function(input_)
         pol2, mem2 = self._base_state_function(input_)
 
-        pol -= (pol2 + self.P_s) * self.reset
+        pol -= (pol2 + P_s) * self.reset
         mem -= (mem2 + 1.5) * self.reset
         return pol, mem
 
