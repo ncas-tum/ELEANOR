@@ -1,8 +1,10 @@
 from typing import Tuple, Union, Callable, Optional, Sequence
 
 import jax
+import equinox as eqx
 import jax.numpy as jnp
 import jax.random as jrand
+import equinox.internal as eqxi
 from chex import Array, PRNGKey
 from snnax.snn.layers.stateful import StateShape, StatefulLayer, default_init_fn
 from snnax.functional.surrogate import SpikeFn, superspike_surrogate
@@ -444,6 +446,101 @@ class Bruno(StatefulLayer):
 
         v = v_outer + jax.lax.stop_gradient(v_inner - v_outer)
         p = p_outer + jax.lax.stop_gradient(p_inner - p_outer)
+
+        spikes_ref = jax.lax.stop_gradient(s)
+        v = (1 - spikes_ref) * v - 1.5 * spikes_ref
+        p = (1 - spikes_ref) * p - (spikes_ref * P_s)  # 0.05308533)
+        # p = (1 - spikes_ref) * p - (spikes_ref * 0.1478602)  # Legacy
+        s = self.spike_fn(v - self.V_thr)
+
+        state = [v, p, s]
+        return [state, [s, v, p]]
+
+
+class Checkpoint(Bruno):
+    checkpoints: Optional[int] = eqx.field(static=True)
+
+    def __init__(self, checkpoints=None, **kwargs):
+        super(Checkpoint, self).__init__(**kwargs)
+
+        self.checkpoints = checkpoints
+
+    @jax.named_scope("eleanor.models.NoBruno")
+    def __call__(
+        self, state: Array, synaptic_input: Array, *, key: Optional[PRNGKey] = None
+    ) -> Tuple[Sequence[Array], Sequence[Array]]:
+        def step(
+            v, p, s, synaptic_input, cap_divider, depol_divider, E_a, P_s, A, I_0, C_tot
+        ):
+            E = v * cap_divider - p * depol_divider
+
+            tau = self.tau_fn(E, E_a)
+
+            I_p_new = (jnp.sign(E) * P_s - p) * A * jax.lax.stop_gradient(tau)
+            dp = I_p_new / A
+
+            I_leak = (I_0 * A * jnp.expm1(v / self.V_t) + self.I_dsc) * jnp.sign(v)
+            dv = (synaptic_input - I_leak - I_p_new) / C_tot
+
+            p_new = jnp.clip(p + 1e-3 * self.dt * dp, -P_s, P_s)
+            v_new = jnp.clip(v + 1e-3 * self.dt * dv, -5, 5)
+
+            spikes_ref = jax.lax.stop_gradient(s)
+            v = (1 - spikes_ref) * v_new + spikes_ref * v
+            p = (1 - spikes_ref) * p_new + spikes_ref * p
+            s = self.spike_fn(v - self.V_thr)
+
+            return v, p, s
+
+        v, p, s = state
+
+        A = self.A_var(self.A, v.shape)
+        E_a = self.E_a_var(self.E_a, v.shape)
+        P_s = self.P_s_var(self.P_s, v.shape)
+        I_0 = self.I_0_var(self.I_0, v.shape)
+        t_hzo = self.t_hzo_var(self.t_hzo, v.shape)
+        t_int = self.t_int_var(self.t_int, v.shape)
+
+        synaptic_input = self.Iin_var(synaptic_input, v.shape)
+
+        C_0 = self._eps0 * self.eps_hzo / t_hzo * A
+        C_tot = C_0 + self.C_par
+
+        cap_divider = self.eps_int / (t_hzo * self.eps_int + t_int * self.eps_hzo)
+        depol_divider = (
+            1 / self._eps0 * t_int / (t_hzo * self.eps_int + t_int * self.eps_hzo)
+        )
+
+        def _body_fun(_save_state, _):
+            v, p, s = _save_state
+            v, p, s = step(
+                v,
+                p,
+                s,
+                synaptic_input,
+                cap_divider,
+                depol_divider,
+                E_a,
+                P_s,
+                A,
+                I_0,
+                C_tot,
+            )
+            return (v, p, s), None
+
+        if self.checkpoints is None:
+            (v, p, _), _ = jax.lax.scan(
+                _body_fun, (v, p, jnp.zeros_like(v)), None, 1000
+            )
+        else:
+            (v, p, _), _ = eqxi.scan(
+                _body_fun,
+                (v, p, jnp.zeros_like(v)),
+                None,
+                1000,
+                kind="checkpointed",
+                checkpoints=self.checkpoints,
+            )
 
         spikes_ref = jax.lax.stop_gradient(s)
         v = (1 - spikes_ref) * v - 1.5 * spikes_ref
