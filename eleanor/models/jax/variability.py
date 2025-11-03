@@ -1,10 +1,56 @@
-from typing import Sequence
+from typing import Generic, TypeVar, Sequence
 
 import jax
 import equinox as eqx
 import jax.random as jrand
+import jax.tree_util as jtu
 from chex import Array, PRNGKey
 from snnax.snn.composed import StateShape
+
+T = TypeVar("T")
+
+
+class StaticWrapper(Generic[T]):
+    """Wrapper that makes content a pytree leaf"""
+
+    def __init__(self, content: T):
+        self.content = content
+
+    def __call__(self, *args, **kwargs):
+        return self.content(*args, **kwargs)
+
+    def __repr__(self):
+        return self.content.__repr__()
+
+
+# Register wrapper as a leaf
+jtu.register_pytree_node(
+    StaticWrapper,
+    lambda x: ((), x.content),  # No children, everything in aux_data
+    lambda content, _: StaticWrapper(content),
+)
+
+
+def find_all_D2D_wrappers_name(model, name):
+    wrappers = []
+    leaves = jtu.tree_leaves(model, is_leaf=lambda x: isinstance(x, StaticWrapper))
+    for leaf in leaves:
+        if (
+            isinstance(leaf, StaticWrapper)
+            and isinstance(leaf.content, D2DVar)
+            and leaf.content.name == name
+        ):
+            wrappers.append(leaf)
+    return wrappers
+
+
+def find_all_D2D_wrappers(model):
+    wrappers = []
+    leaves = jtu.tree_leaves(model, is_leaf=lambda x: isinstance(x, StaticWrapper))
+    for leaf in leaves:
+        if isinstance(leaf, StaticWrapper) and isinstance(leaf.content, D2DVar):
+            wrappers.append(leaf)
+    return wrappers
 
 
 def update_d2d_variability(model: Array, key: PRNGKey) -> Array:
@@ -24,20 +70,25 @@ def update_d2d_variability(model: Array, key: PRNGKey) -> Array:
     Model with the update parameters.
     """
 
-    def is_d2dvar(x):
-        return isinstance(x, D2DVar)
+    old_wrappers = find_all_D2D_wrappers(model)
+    keys = jrand.split(key, len(old_wrappers))
 
-    def get_keys(m):
-        return [
-            x.key
-            for x in jax.tree_util.tree_leaves(m, is_leaf=is_d2dvar)
-            if is_d2dvar(x)
-        ]
+    # Create mapping using object identity
+    wrapper_map = {}
+    for old_wrapper, new_key in zip(old_wrappers, keys):
+        new_noise = jrand.normal(new_key, old_wrapper.content.shape)
+        new_x = eqx.tree_at(lambda x: x.noise, old_wrapper.content, new_noise)
+        wrapper_map[id(old_wrapper)] = StaticWrapper(new_x)
 
-    keys = get_keys(model)
-    new_keys = jrand.split(key, len(keys))
-    new_model = eqx.tree_at(get_keys, model, new_keys)
-    return new_model
+    # Replace in the entire tree
+    def replace_fn(node):
+        if isinstance(node, StaticWrapper) and id(node) in wrapper_map:
+            return wrapper_map[id(node)]
+        return node
+
+    return jtu.tree_map(
+        replace_fn, model, is_leaf=lambda x: isinstance(x, StaticWrapper)
+    )
 
 
 def update_d2d_variability_name(model: Array, name: str, key: PRNGKey) -> Array:
@@ -60,68 +111,77 @@ def update_d2d_variability_name(model: Array, name: str, key: PRNGKey) -> Array:
 
     """
 
-    def is_d2dvar(x):
-        return isinstance(x, D2DVar) and x.name == name
+    old_wrappers = find_all_D2D_wrappers_name(model, name)
+    keys = jrand.split(key, len(old_wrappers))
 
-    def get_keys(m):
-        return [
-            x.key
-            for x in jax.tree_util.tree_leaves(m, is_leaf=is_d2dvar)
-            if is_d2dvar(x)
-        ]
+    # Create mapping using object identity
+    wrapper_map = {}
+    for old_wrapper, new_key in zip(old_wrappers, keys):
+        new_noise = jrand.normal(new_key, old_wrapper.content.shape)
+        new_x = eqx.tree_at(lambda x: x.noise, old_wrapper.content, new_noise)
+        wrapper_map[id(old_wrapper)] = StaticWrapper(new_x)
 
-    keys = get_keys(model)
-    new_keys = jrand.split(key, len(keys))
-    new_model = eqx.tree_at(get_keys, model, new_keys)
-    return new_model
+    # Replace in the entire tree
+    def replace_fn(node):
+        if isinstance(node, StaticWrapper) and id(node) in wrapper_map:
+            return wrapper_map[id(node)]
+        return node
+
+    return jtu.tree_map(
+        replace_fn, model, is_leaf=lambda x: isinstance(x, StaticWrapper)
+    )
 
 
-def set_d2d_variability(model: Array, variability: float | Sequence[float]) -> Array:
-    def is_d2dvar(x):
-        return isinstance(x, D2DVar)
+def set_d2d_variability(model, variability: float | Sequence[float]):
+    old_wrappers = find_all_D2D_wrappers(model)
 
-    def get_var(m):
-        return [
-            x.variability
-            for x in jax.tree_util.tree_leaves(m, is_leaf=is_d2dvar)
-            if is_d2dvar(x)
-        ]
+    if len(old_wrappers) != len(variability):
+        raise ValueError(
+            f"Found {len(old_wrappers)} D2DVar instances but got {len(variability)} variability values"
+        )
 
-    if not hasattr(variability, "__len__"):
-        variability = [variability] * len(get_var(model))
+    # Create mapping using object identity
+    wrapper_map = {}
+    for old_wrapper, new_var in zip(old_wrappers, variability):
+        new_x = eqx.tree_at(lambda x: x.variability, old_wrapper.content, new_var)
+        wrapper_map[id(old_wrapper)] = StaticWrapper(new_x)
 
-    new_model = eqx.tree_at(get_var, model, variability)
-    return new_model
+    # Replace in the entire tree
+    def replace_fn(node):
+        if isinstance(node, StaticWrapper) and id(node) in wrapper_map:
+            return wrapper_map[id(node)]
+        return node
+
+    return jtu.tree_map(
+        replace_fn, model, is_leaf=lambda x: isinstance(x, StaticWrapper)
+    )
 
 
 def set_d2d_variability_name(
     model: Array, name: str, variability: float | Sequence[float]
 ) -> Array:
-    def is_d2dvar_name(x):
-        return isinstance(x, D2DVar) and x.name == name
+    old_wrappers = find_all_D2D_wrappers_name(model, name)
 
-    def is_d2dvar(x):
-        return isinstance(x, D2DVar)
+    if len(old_wrappers) != len(variability):
+        raise ValueError(
+            f"Found {len(old_wrappers)} D2DVar instances but got {len(variability)} variability values"
+        )
 
-    # Filter only the model with the attribute A
-    model_filtered = eqx.filter(model, is_d2dvar_name, is_leaf=is_d2dvar)
+    # Create mapping using object identity
+    wrapper_map = {}
+    for old_wrapper, new_var in zip(old_wrappers, variability):
+        new_x = eqx.tree_at(lambda x: x.variability, old_wrapper.content, new_var)
+        wrapper_map[id(old_wrapper)] = StaticWrapper(new_x)
 
-    def get_var(m):
-        return [
-            x.variability
-            for x in jax.tree_util.tree_leaves(m, is_leaf=is_d2dvar)
-            if is_d2dvar(x)
-        ]
+    # Replace in the entire tree
+    def replace_fn(node):
+        if isinstance(node, StaticWrapper) and id(node) in wrapper_map:
+            return wrapper_map[id(node)]
+        return node
 
-    # Replace the model with the attribute A with the new one
-    if not hasattr(variability, "__len__"):
-        variability = [variability] * len(get_var(model_filtered))
-
-    new_model = eqx.tree_at(get_var, model_filtered, variability)
-
-    # Put back the rest of the model
-    new_model = eqx.combine(new_model, model, is_leaf=is_d2dvar)
-    return new_model
+    return jtu.tree_map(
+        replace_fn, model, is_leaf=lambda x: isinstance(x, StaticWrapper)
+    )
 
 
 class D2DVar(eqx.Module):
@@ -143,12 +203,19 @@ class D2DVar(eqx.Module):
     >>> param_with_variability = param_var(param)
     """
 
-    name: str | None
+    name: str | None = eqx.field(static=True)
+    shape: Sequence[int] = eqx.field(static=True)
     variability: float
-    key: PRNGKey
+    noise: Array
 
-    @jax.named_scope("eleanor.models.D2DVarParam")
-    def __call__(self, mu: Array, shape: StateShape, *, key: PRNGKey = None) -> Array:
+    def __init__(self, name, variability, shape, key):
+        self.name = name
+        self.shape = shape
+        self.variability = variability
+        self.noise = jrand.normal(key, shape)
+
+    @jax.named_scope("eleanor.models.D2DVar")
+    def __call__(self, mu: Array, *, key: PRNGKey = None) -> Array:
         """
         Apply D2D variability into the input parameter.
         key parameter mantained for compatibility.
@@ -164,7 +231,7 @@ class D2DVar(eqx.Module):
         -------
         Array with coefficient of variation :math:`\\text{variability} = \\sigma/\\mu`
         """
-        return mu * (1 + self.variability * jrand.normal(self.key, shape))
+        return mu * (1 + self.variability * self.noise)
 
 
 class C2CVar(eqx.Module):
