@@ -366,7 +366,7 @@ class Checkpoint(Bruno):
 
         self.checkpoints = checkpoints
 
-    @jax.named_scope("eleanor.models.NoBruno")
+    @jax.named_scope("eleanor.models.Checkpoint")
     def __call__(
         self, state: Array, synaptic_input: Array, *, key: Optional[PRNGKey] = None
     ) -> Tuple[Sequence[Array], Sequence[Array]]:
@@ -429,7 +429,7 @@ class Checkpoint(Bruno):
             )
             return (v, p, s), None
 
-        if self.checkpoints is None:
+        if self.checkpoints is not None and self.checkpoints < 0:
             (v, p, _), _ = jax.lax.scan(
                 _body_fun, (v, p, jnp.zeros_like(v)), None, 1000
             )
