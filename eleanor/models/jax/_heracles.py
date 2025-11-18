@@ -63,6 +63,7 @@ class Heracles(StatefulLayer):
 
     def __init__(
         self,
+        shape: Sequence[int],
         A: float = 25e-12,
         t_fe: float = 9.8e-9,
         eps_fe: float = 70,
@@ -84,9 +85,8 @@ class Heracles(StatefulLayer):
         variability: float = 0.0,
         spike_fn: SpikeFn = _spike_fn,
         init_fn: Optional[Callable] = default_init_fn,
-        shape: Optional[StateShape] = None,
-        key: PRNGKey = None,
-        **kwargs,
+        *,
+        key: PRNGKey,
     ) -> None:
         """
         Parameters
@@ -198,10 +198,10 @@ class Heracles(StatefulLayer):
         self.paramsScale = paramsScale
 
         kA, kdpl, kPs, kfe = jrand.split(key, 4)
-        self.A_var = D2DVar("A", variability, kA)
-        self.n_depl_var = D2DVar("n_depl", variability, kdpl)
-        self.P_s_var = D2DVar("P_s", variability, kPs)
-        self.t_fe_var = D2DVar("t_fe", variability, kfe)
+        self.A_var = D2DVar("A", variability, shape, kA)
+        self.n_depl_var = D2DVar("n_depl", variability, shape, kdpl)
+        self.P_s_var = D2DVar("P_s", variability, shape, kPs)
+        self.t_fe_var = D2DVar("t_fe", variability, shape, kfe)
 
     def init_state(
         self, shape: Union[Sequence[int], int], key: PRNGKey, *args, **kwargs
@@ -262,10 +262,10 @@ class Heracles(StatefulLayer):
     ) -> Tuple[Sequence[Array], Sequence[Array]]:
         v, p, spikes = state
 
-        A = self.A_var(self.A, v.shape)
-        n_depl = self.n_depl_var(self.n_depl, v.shape)
-        P_s = self.P_s_var(self.P_s, v.shape)
-        t_fe = self.t_fe_var(self.t_fe, v.shape)
+        A = self.A_var(self.A)
+        n_depl = self.n_depl_var(self.n_depl)
+        P_s = self.P_s_var(self.P_s)
+        t_fe = self.t_fe_var(self.t_fe)
 
         def step(state, synaptic_input, int_div=1):
             v, p, s, A, n_depl, P_s, t_fe, _, _ = state

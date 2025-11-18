@@ -1,4 +1,5 @@
 from typing import Generic, TypeVar, Sequence
+from dataclasses import dataclass
 
 import jax
 import equinox as eqx
@@ -10,25 +11,31 @@ from snnax.snn.composed import StateShape
 T = TypeVar("T")
 
 
-class StaticWrapper(Generic[T]):
-    """Wrapper that makes content a pytree leaf"""
-
-    def __init__(self, content: T):
-        self.content = content
+@dataclass(frozen=True)
+class StaticWrapper:
+    content: T
 
     def __call__(self, *args, **kwargs):
         return self.content(*args, **kwargs)
 
-    def __repr__(self):
-        return self.content.__repr__()
+    def tree_flatten(self):
+        return ((self.content,), {"static": True})
+
+    @classmethod
+    def tree_unflatten(cls, metadata, children):
+        return cls(children[0])
 
 
-# Register wrapper as a leaf
 jtu.register_pytree_node(
-    StaticWrapper,
-    lambda x: ((), x.content),  # No children, everything in aux_data
-    lambda content, _: StaticWrapper(content),
+    StaticWrapper, StaticWrapper.tree_flatten, StaticWrapper.tree_unflatten
 )
+
+# # Register wrapper as a leaf
+# jtu.register_pytree_node(
+#     StaticWrapper,
+#     lambda x: ((), x.content),  # No children, everything in aux_data
+#     lambda content, _: StaticWrapper(content),
+# )
 
 
 def find_all_D2D_wrappers_name(model, name):

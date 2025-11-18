@@ -85,13 +85,13 @@ class Bruno(StatefulLayer):
 
     _eps0: float
 
-    A_var: StaticWrapper[D2DVar]
-    E_a_var: StaticWrapper[D2DVar]
-    P_s_var: StaticWrapper[D2DVar]
-    I_0_var: StaticWrapper[D2DVar]
-    Iin_var: StaticWrapper[D2DVar]
-    t_hzo_var: StaticWrapper[D2DVar]
-    t_int_var: StaticWrapper[D2DVar]
+    A_var: StaticWrapper
+    E_a_var: StaticWrapper
+    P_s_var: StaticWrapper
+    I_0_var: StaticWrapper
+    Iin_var: StaticWrapper
+    t_hzo_var: StaticWrapper
+    t_int_var: StaticWrapper
 
     def __init__(
         self,
