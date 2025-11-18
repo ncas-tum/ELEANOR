@@ -1,0 +1,1 @@
+python experiment_eqx.py -m FeLIF -v 0.0 --I_dsc 10e-12 --paramScale 8 --lr 0.0005

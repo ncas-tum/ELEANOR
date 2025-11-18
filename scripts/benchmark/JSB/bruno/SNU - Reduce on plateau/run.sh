@@ -1,0 +1,1 @@
+python experiment_eqx.py -m GRU --lr 0.0005
