@@ -19,6 +19,7 @@ from snnax.functional.surrogate import SpikeFn, superspike_surrogate
 from eleanor.datasets import shuffle, loadBraille
 from eleanor.models.jax import Bruno, Heracles
 from eleanor.models.jax.weight_quantization import QuantizedLinear
+from eleanor.models.jax.variability import StaticWrapper
 
 NBEPOCHS = 150
 BATCHSIZE_TRAIN = 128  # 4320
@@ -121,7 +122,7 @@ class RLIF(snn.LIF):
         return [state, spike_output]
 
 
-def define_model(key, model_name, quant_bits, use_bias, trial):
+def define_model(key, model_name, quant_bits, use_bias, variability, trial):
     # encoding_gain = trial.suggest_float("encoding_gain", 0.01, 1.0, log=False)
     alpha = trial.suggest_float("alpha", 0.1, 1.0, log=False)
     beta = trial.suggest_float("beta", 0.1, 1.0, log=False)
@@ -135,10 +136,10 @@ def define_model(key, model_name, quant_bits, use_bias, trial):
         V_thr = trial.suggest_float("V_thr", 2.5, 3.5, log=False)
         paramScale = 10 ** trial.suggest_int("paramScale", 5, 12)
         if model_name == "FeLIF":
-            ouputLayer = Bruno(dt=1e-3, V_thr=V_thr, paramsScale=paramScale, key=key4)
+            ouputLayer = Bruno((27,), dt=1e-3, threshold=V_thr, paramsScale=paramScale, variability=variability, key=key4)
         else:
             ouputLayer = Heracles(
-                dt=1e-3, V_thr=V_thr, paramsScale=paramScale, key=key4
+                (27,), dt=1e-3, threshold=V_thr, paramsScale=paramScale, variability=variability, key=key4
             )
     else:
         raise Exception(f"Model {model_name} not found")
@@ -203,7 +204,8 @@ def loss_fn(model, in_states, in_spikes, tgt_class, key):
 # Calculating the gradient with Equinox PyTree filters and
 # subsequently jitting the resulting function
 @eqx.filter_value_and_grad
-def loss_and_grad(model, in_states, in_spikes, tgt_class, key):
+def loss_and_grad(params, static_params, in_states, in_spikes, tgt_class, key):
+    model = eqx.combine(params, static_params)
     keys = jax.random.split(key, in_spikes.shape[0])
     return jnp.mean(loss_fn(model, in_states, in_spikes, tgt_class, keys))
 
@@ -227,7 +229,10 @@ def calc_accuracy(model, in_states, in_spikes, tgt_class, key):
 @eqx.filter_jit
 def update(model, optim, in_states, opt_state, in_spikes, tgt_class, key):
     # Get gradients
-    loss, grads = loss_and_grad(model, in_states, in_spikes, tgt_class, key)
+    trainable, static = eqx.partition(
+        model, eqx.is_array, is_leaf=lambda x: isinstance(x, StaticWrapper)
+    )
+    loss, grads = loss_and_grad(trainable, static, in_states, in_spikes, tgt_class, key)
 
     # Calculate parameter updates using the optimizer
     updates, opt_state = optim.update(grads, opt_state)
@@ -237,7 +242,7 @@ def update(model, optim, in_states, opt_state, in_spikes, tgt_class, key):
     return model, opt_state, loss
 
 
-def _objective(model_name, quant_bits, use_bias, trial, seed):
+def _objective(model_name, quant_bits, use_bias, variability, trial, seed):
     trainset, testset, nb_outputs, nb_channels, nb_steps, time_step = loadBraille(
         2, 200
     )
@@ -245,7 +250,7 @@ def _objective(model_name, quant_bits, use_bias, trial, seed):
     key = jrandom.key(seed)
     key, kmodel, kstate = jrandom.split(key, 3)
 
-    model = define_model(kmodel, model_name, quant_bits, use_bias, trial)
+    model = define_model(kmodel, model_name, quant_bits, use_bias, variability, trial)
     optim = optax.adamax(
         learning_rate=trial.suggest_float("lr", 1e-5, 1e-1, log=True), b1=0.9, b2=0.995
     )
@@ -288,12 +293,18 @@ def _objective(model_name, quant_bits, use_bias, trial, seed):
         total_accuracy.append(accuracy_test.item())
         pbar.set_postfix({"Acc": accuracy_test.item()})
 
+    logdir = f"export/{variability}"
+    if not os.path.exists(logdir):
+        os.makedirs(logdir)
+    eqx.tree_serialise_leaves(os.path.join(logdir, f"{quant_bits}bit_{model_name}_{seed}.eqx"), model)
+
     return total_accuracy, total_loss
 
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-m", "--model", type=str, default="FeLIF")
 parser.add_argument("-q", "--quantization", type=str, default="FP")
+parser.add_argument("-v", "--variability", type=float, default=0.0)
 parser.add_argument("--seed", type=int, default=0)
 
 args = parser.parse_args()
@@ -306,14 +317,14 @@ elif args.model == "Heracles" or args.model == "FeLIF":
 else:
     raise Exception(f"Model {args.model} not found")
 
-objective = partial(_objective, args.model, args.quantization, False)
+objective = partial(_objective, args.model, args.quantization, False, args.variability)
 storage = optuna.storages.RDBStorage("sqlite:///bruno.db")
 
 study = optuna.load_study(
     storage=storage, study_name=f"{args.quantization}bit {args.model}"
 )
 
-logdir = f"results_new/{args.quantization}bit_{args.model}"
+logdir = f"results_new/{args.quantization}bit_{args.model}/{args.variability}"
 if not os.path.exists(logdir):
     os.makedirs(logdir)
 
@@ -333,6 +344,7 @@ newdf = pd.DataFrame(
         "Loss": loss,
         "Epoch": jnp.arange(nepochs),
         "Seed": [args.seed] * nepochs,
+        "Variability": [args.variability] * nepochs,
         "Quantization": [args.quantization] * nepochs,
         "Model": [args.model] * nepochs,
     }

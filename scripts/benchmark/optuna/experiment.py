@@ -17,6 +17,7 @@ from snnax.functional.surrogate import SpikeFn, superspike_surrogate
 from eleanor.datasets import shuffle, loadBraille
 from eleanor.models.jax import Bruno, Heracles
 from eleanor.models.jax.weight_quantization import QuantizedLinear
+from eleanor.models.jax.variability import StaticWrapper
 
 SEED = 13
 NBEPOCHS = 150
@@ -201,7 +202,8 @@ def loss_fn(model, in_states, in_spikes, tgt_class, key):
 # Calculating the gradient with Equinox PyTree filters and
 # subsequently jitting the resulting function
 @eqx.filter_value_and_grad
-def loss_and_grad(model, in_states, in_spikes, tgt_class, key):
+def loss_and_grad(trainable, static, in_states, in_spikes, tgt_class, key):
+    model = eqx.combine(trainable, static)
     keys = jax.random.split(key, BATCHSIZE)
     return jnp.mean(loss_fn(model, in_states, in_spikes, tgt_class, keys))
 
@@ -225,7 +227,10 @@ def calc_accuracy(model, in_states, in_spikes, tgt_class, key):
 @eqx.filter_jit
 def update(model, optim, in_states, opt_state, in_spikes, tgt_class, key):
     # Get gradients
-    loss, grads = loss_and_grad(model, in_states, in_spikes, tgt_class, key)
+    trainable, static = eqx.partition(
+        model, eqx.is_array, is_leaf=lambda x: isinstance(x, StaticWrapper)
+    )
+    loss, grads = loss_and_grad(trainable, static, in_states, in_spikes, tgt_class, key)
 
     # Calculate parameter updates using the optimizer
     updates, opt_state = optim.update(grads, opt_state)
