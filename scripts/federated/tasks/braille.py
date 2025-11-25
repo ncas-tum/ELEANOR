@@ -12,8 +12,8 @@ from flwr_datasets.partitioner import DirichletPartitioner
 
 from eleanor.models.torch import FeLIF, Heracles
 
-# fds = None
-# partitioner = None  # Cache FederatedDataset
+fds = None
+partitioner = None  # Cache FederatedDataset
 
 
 class LitBraille(L.LightningModule):
@@ -92,10 +92,10 @@ def load_data(
     alpha: int = 100,
     upsample: int = 2,
 ):
-    # global partitioner
-    # global fds
-    fds = None
-    partitioner = None  # Cache FederatedDataset
+    global partitioner
+    global fds
+    # fds = None
+    # partitioner = None  # Cache FederatedDataset
 
     if fds is None:
         fds, _, _, _, _ = create_dataset(upsample, 200)
@@ -148,7 +148,7 @@ def load_felif(
         EncodingLayer(enc_gain, enc_bias, num_hidden // 4),
         snn.Leaky(0.95, threshold=1, learn_beta=False, init_hidden=True),
         nn.Linear(num_hidden, 27, bias=use_bias),
-        nn.BatchNorm1d(27),
+        # nn.BatchNorm1d(27),
         FeLIF(
             tau_p,
             tau_m,
@@ -201,11 +201,11 @@ def load_heracles(
 
     model = nn.Sequential(
         EncodingLayer(enc_gain, enc_bias, num_hidden // 4),
-        nn.BatchNorm1d(num_hidden),
+        # nn.BatchNorm1d(num_hidden),
         snn.Leaky(np.exp(-dt / 20e-3), threshold=1, learn_beta=False, init_hidden=True),
         nn.Linear(num_hidden, 27, bias=use_bias),
         # Gain(2e-9),
-        nn.BatchNorm1d(27),
+        # nn.BatchNorm1d(27),
         Heracles(
             I_dsc=I_dsc,
             threshold=threshold,
