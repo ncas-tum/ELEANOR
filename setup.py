@@ -10,7 +10,7 @@ from torch.utils.cpp_extension import (
     BuildExtension,
 )
 
-library_name = "eleanor"
+LIBRARY_NAME = "eleanor"
 
 if torch.__version__ >= "2.6.0":
     py_limited_api = True
@@ -21,14 +21,13 @@ else:
 def get_extensions():
     debug_mode = os.getenv("DEBUG", "0") == "1"
     use_cuda = os.getenv("USE_CUDA", "1" if torch.cuda.is_available() else "0") == "1"
+    use_cuda = use_cuda and torch.cuda.is_available() and CUDA_HOME is not None
+    extension = CUDAExtension if use_cuda else CppExtension
+
     print("Compiling")
     if debug_mode:
         print("Compiling in debug mode")
 
-    use_cuda = use_cuda and torch.cuda.is_available() and CUDA_HOME is not None
-    extension = CUDAExtension if use_cuda else CppExtension
-
-    extra_link_args = []
     extra_compile_args = {
         "cxx": [
             "-O3" if not debug_mode else "-O0",
@@ -40,35 +39,28 @@ def get_extensions():
             "-O3" if not debug_mode else "-O0",
         ],
     }
+
+    extra_link_args = []
     if debug_mode:
         extra_compile_args["cxx"].append("-g")
         extra_compile_args["nvcc"].append("-g")
         extra_link_args.extend(["-O0", "-g"])
 
-    this_dir = os.path.dirname(os.path.curdir)
-    extensions_dir = os.path.join(this_dir, library_name, "models", "torch", "csrc")
+    this_dir = os.path.dirname(os.path.relpath(__file__))
+    extensions_dir = os.path.join(this_dir, LIBRARY_NAME, "models", "torch", "csrc")
     sources = list(glob.glob(os.path.join(extensions_dir, "**/*.cpp"), recursive=True))
-
-    # extensions_cuda_dir = os.path.join(extensions_dir, "cuda")
-    cuda_sources = list(
-        glob.glob(os.path.join(extensions_dir, "**/*.cu"), recursive=True)
-    )
-
     if use_cuda:
-        sources += cuda_sources
+        sources += glob.glob(os.path.join(extensions_dir, "**/*.cu"), recursive=True)
 
-    ext_modules = [
+    return [
         extension(
-            f"{library_name}.models.torch._C",
+            f"{LIBRARY_NAME}.models.torch._C",
             sources,
             extra_compile_args=extra_compile_args,
             extra_link_args=extra_link_args,
             py_limited_api=py_limited_api,
         )
     ]
-
-    return ext_modules
-
 
 setup(
     packages=find_packages(),

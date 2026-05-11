@@ -1,6 +1,86 @@
+[project]
+name = "eleanor"
+dynamic = ["version"]
+description = "Python package to simulate FeLIF neurons"
+readme = "README.md"
+license = { file = "LICENSE.txt" }
+requires-python = ">=3.10"
+authors = [
+  { name = "Fernando M. Quintana Velázquez", email = "fernando.quintana@tum.de" },
+  { name = "Luca Fehlings", email = "luca.fehlings@tum.de" },
+  { name = "Martin A. Nicholson", email = "m.a.nicholson@student.rug.nl" },
+  { name = "Pedro F. Ortiz Costa", email = "p.f.ortiz.costa@student.rug.nl" },
+]
+maintainers = [
+  { name = "Fernando M. Quintana Velázquez", email = "fernando.quintana@tum.de" },
+]
+classifiers = [
+  "Development Status :: 1 - Planning",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Education",
+  "Intended Audience :: Science/Research",
+  "Natural Language :: English",
+  "Topic :: Scientific/Engineering",
+  "Topic :: Scientific/Engineering :: Mathematics",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Programming Language :: Python :: 3.11",
+  "Operating System :: OS Independent",
+]
+dependencies = [
+  "torch",
+  "jax",
+  "matplotlib",
+  "seaborn",
+  "pandas",
+  "tqdm",
+  "scikit-learn",
+  "ipykernel",
+  "ipywidgets",
+  "orbax-checkpoint",
+  "aqtp",
+  "snnax",
+  "datasets",
+  "flwr-datasets",
+  "tensorboard",
+  "cmaes",
+]
+
+[project.optional-dependencies]
+cuda = ["jax[cuda12]"]
+dev = [
+  "pre-commit",
+  "black[jupyter]",
+  "isort",
+  "flake8-black",
+  "flake8-isort",
+  "sphinx>=4.0",
+  "sphinx-book-theme",
+  "myst-nb",
+  "expecttest",
+  "hypothesis",
+]
+
+[project.urls]
+Documentation = "https://readthedocs.org"
+Repository = "https://github.com/bics-rug/ELEANOR"
+Issues = "https://github.com/bics-rug/ELEANOR/issues"
+
+[tool.setuptools]
+# ext_modules + cmdclass stay in setup.py because BuildExtension is code-only
+packages = { find = {} }
+
+[tool.setuptools_scm]
+version_file = "eleanor/_version.py"
+
+[tool.uv.sources]
+snnax = { git = "https://github.com/PGI15/snnax.git" }
+
 [build-system]
+# torch is listed here so it's importable in setup.py during the isolated build.
 requires = [
     "setuptools",
+    "wheel",
     "torch",
+    "setuptools_scm"
 ]
 build-backend = "setuptools.build_meta"
