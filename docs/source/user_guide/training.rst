@@ -90,5 +90,4 @@ See also
 --------
 
 - :doc:`../tutorials/train` — end-to-end neuron optimization notebook.
-- :doc:`../tutorials/shd` — Spiking Heidelberg Digits training.
 - :doc:`../tutorials/precision` — training under weight quantization.

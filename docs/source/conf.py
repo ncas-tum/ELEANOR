@@ -57,7 +57,8 @@ suppress_warnings = ["myst.header"]
 autodoc_default_options = {
     "members": True,
     "show-inheritance": True,
-    "special-members": "__call__, __init__",
+    "special-members": "__call__",
+    "exclude-members": "Array",
 }
 autodoc_mock_imports = [
     "torch",
@@ -70,6 +71,7 @@ autodoc_mock_imports = [
     "etils",
     "aqtp",
     "ray",
+    "scipy",
     "eleanor.torch.models._C",
 ]
 autodoc_typehints = "description"

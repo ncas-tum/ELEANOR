@@ -10,7 +10,7 @@ from jaxtyping import Array, PRNGKeyArray
 
 from eleanor.jax.variability import D2DVar, StaticWrapper
 
-from .._surrogate import tanh_surrogate
+from ..surrogate import tanh_surrogate
 from ._base import NeuronModel, default_floating_dtype
 
 

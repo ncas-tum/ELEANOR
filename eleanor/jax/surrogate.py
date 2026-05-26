@@ -1,6 +1,6 @@
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array
+from jaxtyping import Array, Float
 
 
 def _unbroadcast(grad, target_shape):
@@ -60,7 +60,9 @@ def tau_surr(alpha: float = 1.3, E_a: float = 1.0, soft_E: float = 1e-18):
 
 
 @jax.custom_gradient
-def atan_surrogate(x: Array):
+def atan_surrogate(x: Float[Array, "..."]):
+    """Surrogate gradient function based on the arctangent."""
+
     y = jnp.heaviside(x, 1.0)
 
     def grad(dy):
@@ -72,7 +74,8 @@ def atan_surrogate(x: Array):
 
 
 @jax.custom_gradient
-def tanh_surrogate(x: Array):
+def tanh_surrogate(x: Float[Array, "..."]):
+    """Surrogate gradient function based on the hyperbolic tangent."""
 
     y = jnp.heaviside(x, 1.0)
 

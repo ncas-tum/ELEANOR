@@ -10,3 +10,4 @@ button at the top of the rendered page.
 
    heracles
    precision
+   train

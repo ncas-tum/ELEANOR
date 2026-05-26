@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray
 
-from .._surrogate import tanh_surrogate, tau_surr
+from ..surrogate import tanh_surrogate, tau_surr
 from ..variability import D2DVar, StaticWrapper
 from ._base import NeuronModel, default_floating_dtype
 

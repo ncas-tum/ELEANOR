@@ -68,3 +68,16 @@ for **n**\ ovel device **o**\ ptimisation method from Fehlings et al., NCE
    :class:`eleanor.jax.models.BrunoParams`.
 
 See :class:`eleanor.jax.models.BrunoParams` for parameter names and defaults.
+
+Examples
+=========
+
+Executable Jupyter notebooks covering the three different neuron models using 
+PyTorch backend.
+
+.. toctree::
+   :maxdepth: 1
+
+   examples/felif
+   examples/bruno
+   examples/heracles

@@ -46,8 +46,11 @@ dependencies = [
     "scikit-learn>=1.8.0",
     "seaborn>=0.13.2",
     "snntorch>=0.9.4",
+    "spyx>=0.1.20",
     "tensorboard>=2.20.0",
+    "tonic>=1.4.3",
     "torch>=2.12.0",
+    "torchvision>=0.27.0",
     "tqdm>=4.67.3",
 ]
 
