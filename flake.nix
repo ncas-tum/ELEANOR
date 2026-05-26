@@ -33,6 +33,7 @@
             git
             uv
             cmake
+            texlive.combined.scheme-full
           ] ++ pkgs.lib.optionals (hasCuda) [
               cudaPackages.cudatoolkit
               cudaPackages.cudnn
@@ -47,6 +48,9 @@
               ];
               XLA_FLAGS = "--xla_gpu_cuda_data_dir=${pkgs.cudaPackages.cudatoolkit}";
             };
+          shellHook = ''
+            export SOURCE_DATE_EPOCH=$(date +%s)
+          '';
         };
       });
     };

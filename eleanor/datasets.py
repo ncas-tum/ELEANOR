@@ -2,8 +2,8 @@ import pickle
 from functools import partial
 
 import jax
-import numpy as np
 import jax.numpy as jnp
+import numpy as np
 from scipy import signal
 
 
@@ -13,12 +13,11 @@ def shuffle(dataset, shuffle_rng, batch_size):
 
     cutoff = y.shape[0] % batch_size
 
+    obs = jax.random.permutation(shuffle_rng, x, axis=0)
+    labels = jax.random.permutation(shuffle_rng, y, axis=0)
     if cutoff > 0:
-        obs = jax.random.permutation(shuffle_rng, x, axis=0)[:-cutoff]
-        labels = jax.random.permutation(shuffle_rng, y, axis=0)[:-cutoff]
-    else:
-        obs = jax.random.permutation(shuffle_rng, x, axis=0)
-        labels = jax.random.permutation(shuffle_rng, y, axis=0)
+        obs = obs[:-cutoff]
+        labels = labels[:-cutoff]
 
     obs = jnp.reshape(obs, (-1, batch_size) + obs.shape[1:])
     labels = jnp.reshape(labels, (-1, batch_size))  # should make batch size a global
@@ -26,19 +25,24 @@ def shuffle(dataset, shuffle_rng, batch_size):
     return (obs, labels)
 
 
-def loadBraille(nb_upsample, nb_repetitions, *, key=None):
+def loadBraille(nb_upsample, nb_repetitions, full=False, *, key=None):
     from io import BytesIO
     from pathlib import Path
-    from zipfile import ZipFile
     from urllib.request import urlopen
+    from zipfile import ZipFile
 
-    file_name = Path("./data/braille/data/data_braille_letters_raw")
+    file_name = Path(
+        "/Users/ferqui/TUM/ELEANOR/scripts/maleficent/data/braille/data/data_braille_letters_raw"
+    )
     if not file_name.exists():
         resp = urlopen(
             "https://zenodo.org/records/6556273/files/reading_braille_data.zip"
         )
         with ZipFile(BytesIO(resp.read())) as zObject:
-            zObject.extract("data/data_braille_letters_raw", path="./data/braille")
+            zObject.extract(
+                "data/data_braille_letters_raw",
+                path="/Users/ferqui/TUM/ELEANOR/scripts/maleficent/data/braille",
+            )
 
     with open(file_name, "rb") as infile:
         data_dict = pickle.load(infile)
@@ -84,8 +88,8 @@ def loadBraille(nb_upsample, nb_repetitions, *, key=None):
             labels.append(i)
 
     # Crop to same length
-    data_steps = l = np.min([len(d) for d in data])
-    data = jnp.array([d[:l] for d in data])
+    data_steps = length = np.min([len(d) for d in data])
+    data = jnp.array([d[:length] for d in data])
     labels = jnp.array(labels)
 
     # Select nonzero inputs
@@ -111,10 +115,6 @@ def loadBraille(nb_upsample, nb_repetitions, *, key=None):
     data = jax.random.permutation(key, data, axis=0)
     labels = jax.random.permutation(key, labels, axis=0)
 
-    a = int(0.8 * len(labels))
-    x_train, x_test = data[:a], data[a:]
-    y_train, y_test = labels[:a], labels[a:]
-
     nb_channels = len(nzid)
     time_step = (
         2e-3 / nb_upsample
@@ -124,11 +124,25 @@ def loadBraille(nb_upsample, nb_repetitions, *, key=None):
     )  # TODO We should change this and upsample the input data
     nb_outputs = len(np.unique(labels))  # + 1
 
-    return (
-        (x_train, y_train),
-        (x_test, y_test),
-        nb_outputs,
-        nb_channels,
-        nb_steps,
-        time_step,
-    )
+    if full:
+        return (
+            data,
+            labels,
+            nb_outputs,
+            nb_channels,
+            nb_steps,
+            time_step,
+        )
+    else:
+        a = int(0.8 * len(labels))
+        x_train, x_test = data[:a], data[a:]
+        y_train, y_test = labels[:a], labels[a:]
+
+        return (
+            (x_train, y_train),
+            (x_test, y_test),
+            nb_outputs,
+            nb_channels,
+            nb_steps,
+            time_step,
+        )

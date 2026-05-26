@@ -1,13 +1,13 @@
-import os
 import glob
+import os
 
 import torch
-from setuptools import setup, find_packages
+from setuptools import find_packages, setup
 from torch.utils.cpp_extension import (
     CUDA_HOME,
+    BuildExtension,
     CppExtension,
     CUDAExtension,
-    BuildExtension,
 )
 
 LIBRARY_NAME = "eleanor"
@@ -47,20 +47,21 @@ def get_extensions():
         extra_link_args.extend(["-O0", "-g"])
 
     this_dir = os.path.dirname(os.path.relpath(__file__))
-    extensions_dir = os.path.join(this_dir, LIBRARY_NAME, "models", "torch", "csrc")
+    extensions_dir = os.path.join(this_dir, LIBRARY_NAME, "torch", "models", "csrc")
     sources = list(glob.glob(os.path.join(extensions_dir, "**/*.cpp"), recursive=True))
     if use_cuda:
         sources += glob.glob(os.path.join(extensions_dir, "**/*.cu"), recursive=True)
 
     return [
         extension(
-            f"{LIBRARY_NAME}.models.torch._C",
+            f"{LIBRARY_NAME}.torch.models._C",
             sources,
             extra_compile_args=extra_compile_args,
             extra_link_args=extra_link_args,
             py_limited_api=py_limited_api,
         )
     ]
+
 
 setup(
     packages=find_packages(),
