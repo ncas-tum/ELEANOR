@@ -15,6 +15,7 @@ results2
 *.db
 log*
 ToStore
+.DS_Store
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

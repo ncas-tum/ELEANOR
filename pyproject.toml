@@ -55,7 +55,7 @@ dependencies = [
 ]
 
 [project.urls]
-Documentation = "https://readthedocs.org"
+Documentation = "https://ncas-tum.github.io/ELEANOR/"
 Repository = "https://github.com/ncas-tum/ELEANOR"
 Issues = "https://github.com/ncas-tum/ELEANOR/issues"
 
