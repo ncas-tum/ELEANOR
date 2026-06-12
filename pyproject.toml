@@ -28,7 +28,7 @@ classifiers = [
   "Operating System :: OS Independent",
 ]
 dependencies = [
-    "boilerplot",
+    "boilerplot@git+https://github.com/fehlings/boilerplot.git",
     "datasets>=4.8.5",
     "equinox>=0.13.8",
     "flwr-datasets>=0.6.0",
@@ -53,17 +53,15 @@ dependencies = [
     "torchvision>=0.27.0",
     "tqdm>=4.67.3",
 ]
-
 [project.urls]
 Documentation = "https://ncas-tum.github.io/ELEANOR/"
 Repository = "https://github.com/ncas-tum/ELEANOR"
 Issues = "https://github.com/ncas-tum/ELEANOR/issues"
 
 [project.optional-dependencies]
-gpu = [
-    "jax-mps>=0.10.0; sys_platform == 'darwin'",
-    "jax[cuda12]; sys_platform == 'linux'",
-]
+mps = ["jax-mps>=0.10.0"]
+cuda12 = ["jax[cuda13]"]
+cuda13 = ["jax[cuda13]"]
 
 [tool.setuptools]
 # ext_modules + cmdclass stay in setup.py because BuildExtension is code-only
@@ -71,9 +69,6 @@ packages = { find = {} }
 
 [tool.setuptools_scm]
 version_file = "eleanor/_version.py"
-
-[tool.uv.sources]
-boilerplot = { git = "https://github.com/fehlings/boilerplot.git" }
 
 [build-system]
 requires = [
