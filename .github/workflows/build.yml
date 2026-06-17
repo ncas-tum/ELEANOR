@@ -10,6 +10,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ["3.12"]
+        cuda: ["126", "130"]
         include:
           - cuda: "126"
             cuda_image: "12.6.0"
@@ -43,7 +44,7 @@ jobs:
         run: |
           python${{ matrix.python }} -m pip install --upgrade pip
           python${{ matrix.python }} -m pip install torch --extra-index-url https://download.pytorch.org/whl/cu${{ matrix.cuda }}
-          python${{ matrix.python }} -m pip install build auditwheel
+          python${{ matrix.python }} -m pip install build auditwheel ninja
  
       - name: Build wheel
         env:
@@ -87,7 +88,7 @@ jobs:
           apt update && apt install -y patchelf git
           python -m pip install --upgrade pip
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-          python -m pip install build auditwheel
+          python -m pip install build auditwheel ninja
  
       - name: Build wheel
         env:
@@ -156,6 +157,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ["3.12"]
+        tag: ["cu126", "cu130", "cpu"]
         include:
           - tag: cu126
             base_image: "nvidia/cuda:12.6.0-runtime-ubuntu22.04"
