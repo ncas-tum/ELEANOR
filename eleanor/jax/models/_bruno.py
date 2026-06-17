@@ -218,7 +218,7 @@ class BrunoCell(NeuronModel):
         )
         E = v * cap_divider - p * depol_divider
 
-        I_p_new = (jnp.sign(E) * P_s - p) * A * tau_fn(E, E_a)
+        I_p_new = (jnp.sign(E) * P_s - p) * A * jax.lax.stop_gradient(tau_fn(E, E_a))
         dp = I_p_new / A
         p_outer = jnp.clip(p + self.params.dt * dp, -P_s, P_s)
 
