@@ -18,6 +18,11 @@ jobs:
     runs-on: ubuntu-latest
     container: nvidia/cuda:${{ matrix.cuda_image }}-devel-ubuntu22.04
     steps:
+      - name: Install git
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: apt update && apt install -y git
+ 
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -26,12 +31,12 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          apt-get update
-          apt-get install -y software-properties-common git
+          apt update
+          apt install -y software-properties-common
           git config --global --add safe.directory '*'
           add-apt-repository -y ppa:deadsnakes/ppa
-          apt-get update
-          apt-get install -y python${{ matrix.python }} python${{ matrix.python }}-venv python${{ matrix.python }}-dev patchelf
+          apt update
+          apt install -y python${{ matrix.python }} python${{ matrix.python }}-venv python${{ matrix.python }}-dev patchelf
           python${{ matrix.python }} -m ensurepip --upgrade
  
       - name: Install deps
