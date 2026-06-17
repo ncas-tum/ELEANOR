@@ -9,6 +9,7 @@ from torch.utils.cpp_extension import (
     CppExtension,
     CUDAExtension,
 )
+from eleanor._cuda_version import cuda_local_scheme
 
 LIBRARY_NAME = "eleanor"
 
@@ -59,4 +60,5 @@ setup(
     ext_modules=get_extensions(),
     cmdclass={"build_ext": BuildExtension},
     options={},
+    use_scm_version={"local_scheme": cuda_local_scheme}
 )

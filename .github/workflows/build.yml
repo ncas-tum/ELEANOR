@@ -21,6 +21,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Setup Python
         run: |
+          export DEBIAN_FRONTEND=noninteractive
           apt update && apt install -y software-properties-common
           add-apt-repository -y ppa:deadsnakes/ppa
           apt update && apt install -y python${{ matrix.python }} python${{ matrix.python }}-venv python${{ matrix.python }}-dev patchelf git
@@ -61,6 +62,7 @@ jobs:
  
       - name: Install deps
         run: |
+          export DEBIAN_FRONTEND=noninteractive
           apt update && apt install -y patchelf git
           python -m pip install --upgrade pip
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
