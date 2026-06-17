@@ -3,7 +3,7 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
-
+ 
 jobs:
   build-cuda:
     strategy:
@@ -11,39 +11,41 @@ jobs:
       matrix:
         python: ["3.12"]
         include:
-        - cuda: "126"
-          cuda_image: "12.6.0"
-        - cuda: "130"
-          cuda_image: "13.0.0"
+          - cuda: "126"
+            cuda_image: "12.6.0"
+          - cuda: "130"
+            cuda_image: "13.0.0"
     runs-on: ubuntu-latest
     container: nvidia/cuda:${{ matrix.cuda_image }}-devel-ubuntu22.04
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+ 
       - name: Setup Python
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          apt update
-          apt install -y software-properties-common git
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          apt-get update
+          apt-get install -y software-properties-common git
+          git config --global --add safe.directory '*'
           add-apt-repository -y ppa:deadsnakes/ppa
-          apt update
-          apt install -y python${{ matrix.python }} python${{ matrix.python }}-venv python${{ matrix.python }}-dev patchelf
+          apt-get update
+          apt-get install -y python${{ matrix.python }} python${{ matrix.python }}-venv python${{ matrix.python }}-dev patchelf
           python${{ matrix.python }} -m ensurepip --upgrade
-      
+ 
       - name: Install deps
         run: |
           python${{ matrix.python }} -m pip install --upgrade pip
           python${{ matrix.python }} -m pip install torch --extra-index-url https://download.pytorch.org/whl/cu${{ matrix.cuda }}
           python${{ matrix.python }} -m pip install build auditwheel
-      
+ 
       - name: Build wheel
         env:
           CUDA_VERSION: ${{ matrix.cuda }}
+          SETUPTOOLS_SCM_IGNORE_DUBIOUS_OWNER: "1"
         run: python${{ matrix.python }} -m build --wheel
-      
+ 
       - name: Repair wheel
         run: |
           python${{ matrix.python }} -m auditwheel repair dist/*.whl -w dist_repaired/ \
@@ -52,7 +54,7 @@ jobs:
             --exclude libtorch_cpu.so \
             --exclude libc10.so \
             --exclude libc10_cuda.so
-      
+ 
       - uses: actions/upload-artifact@v4
         with:
           name: wheels-cu${{ matrix.cuda }}-py${{ matrix.python }}
@@ -74,8 +76,9 @@ jobs:
           python-version: ${{ matrix.python }}
  
       - name: Install deps
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
-          export DEBIAN_FRONTEND=noninteractive
           apt update && apt install -y patchelf git
           python -m pip install --upgrade pip
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
