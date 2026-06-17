@@ -69,6 +69,7 @@ packages = { find = {} }
 
 [tool.setuptools_scm]
 version_file = "eleanor/_version.py"
+local_scheme = "eleanor._cuda_version:cuda_local_scheme"
 
 [build-system]
 requires = [
