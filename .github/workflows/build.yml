@@ -19,22 +19,31 @@ jobs:
     container: nvidia/cuda:${{ matrix.cuda_image }}-devel-ubuntu22.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Setup Python
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
-          export DEBIAN_FRONTEND=noninteractive
-          apt update && apt install -y software-properties-common
+          apt update
+          apt install -y software-properties-common git
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           add-apt-repository -y ppa:deadsnakes/ppa
-          apt update && apt install -y python${{ matrix.python }} python${{ matrix.python }}-venv python${{ matrix.python }}-dev patchelf git
+          apt update
+          apt install -y python${{ matrix.python }} python${{ matrix.python }}-venv python${{ matrix.python }}-dev patchelf
           python${{ matrix.python }} -m ensurepip --upgrade
+      
       - name: Install deps
         run: |
           python${{ matrix.python }} -m pip install --upgrade pip
           python${{ matrix.python }} -m pip install torch --extra-index-url https://download.pytorch.org/whl/cu${{ matrix.cuda }}
           python${{ matrix.python }} -m pip install build auditwheel
+      
       - name: Build wheel
         env:
           CUDA_VERSION: ${{ matrix.cuda }}
         run: python${{ matrix.python }} -m build --wheel
+      
       - name: Repair wheel
         run: |
           python${{ matrix.python }} -m auditwheel repair dist/*.whl -w dist_repaired/ \
@@ -43,10 +52,12 @@ jobs:
             --exclude libtorch_cpu.so \
             --exclude libc10.so \
             --exclude libc10_cuda.so
+      
       - uses: actions/upload-artifact@v4
         with:
           name: wheels-cu${{ matrix.cuda }}-py${{ matrix.python }}
           path: dist_repaired/*.whl
+  
   build-cpu:
     strategy:
       fail-fast: false
@@ -55,6 +66,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
  
       - uses: actions/setup-python@v5
         with:
@@ -84,3 +97,94 @@ jobs:
         with:
           name: wheels-cpu-py${{ matrix.python }}
           path: dist_repaired/*.whl
+
+
+  build-dev-image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tag: cu126
+            base_image: "nvidia/cuda:12.6.0-devel-ubuntu22.04"
+            torch_channel: cu126
+          - tag: cu130
+            base_image: "nvidia/cuda:13.0.0-devel-ubuntu22.04"
+            torch_channel: cu130
+          - tag: cpu
+            base_image: "ubuntu:22.04"
+            torch_channel: cpu
+    steps:
+      - uses: actions/checkout@v4
+ 
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push dev image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.dev
+          build-args: |
+            BASE_IMAGE=${{ matrix.base_image }}
+            TORCH_CHANNEL=${{ matrix.torch_channel }}
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/eleanor-dev:${{ matrix.tag }}
+  
+  build-release-image:
+    needs: [build-cuda, build-cpu]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12"]
+        include:
+          - tag: cu126
+            base_image: "nvidia/cuda:12.6.0-runtime-ubuntu22.04"
+            torch_channel: cu126
+            artifact_name: wheels-cu126
+          - tag: cu130
+            base_image: "nvidia/cuda:13.0.0-runtime-ubuntu22.04"
+            torch_channel: cu130
+            artifact_name: wheels-cu130
+          - tag: cpu
+            base_image: "ubuntu:22.04"
+            torch_channel: cpu
+            artifact_name: wheels-cpu
+    steps:
+      - uses: actions/checkout@v4
+ 
+      - name: Download wheel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}-py${{ matrix.python }}
+          path: dist_for_image
+ 
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+ 
+      - name: Build and push release image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.release
+          build-args: |
+            BASE_IMAGE=${{ matrix.base_image }}
+            PYTHON_VERSION=${{ matrix.python }}
+            TORCH_CHANNEL=${{ matrix.torch_channel }}
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/eleanor:${{ matrix.tag }}
