@@ -9,9 +9,14 @@ from torch.utils.cpp_extension import (
     CppExtension,
     CUDAExtension,
 )
-from eleanor._cuda_version import cuda_local_scheme
 
 LIBRARY_NAME = "eleanor"
+
+def cuda_local_scheme(version):
+    cuda = os.environ.get("CUDA_VERSION")
+    if cuda and cuda != "cpu":
+        return f"+cu{cuda}"
+    return ""
 
 def get_extensions():
     debug_mode = os.getenv("DEBUG", "0") == "1"
