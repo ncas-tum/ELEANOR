@@ -14,8 +14,10 @@ jobs:
         include:
           - cuda: "126"
             cuda_image: "12.6.0"
+            jax_extra: cuda12
           - cuda: "130"
             cuda_image: "13.0.0"
+            jax_extra: cuda13
     runs-on: ubuntu-latest
     container: nvidia/cuda:${{ matrix.cuda_image }}-devel-ubuntu22.04
     steps:
@@ -44,12 +46,15 @@ jobs:
         run: |
           python${{ matrix.python }} -m pip install --upgrade pip
           python${{ matrix.python }} -m pip install torch --extra-index-url https://download.pytorch.org/whl/cu${{ matrix.cuda }}
+          python${{ matrix.python }} -m pip install "jax[${{ matrix.jax_extra }}]"
           python${{ matrix.python }} -m pip install build auditwheel ninja
  
       - name: Build wheel
         env:
           CUDA_VERSION: ${{ matrix.cuda }}
+          JAX_EXTRA: ${{ matrix.jax_extra }}
           SETUPTOOLS_SCM_IGNORE_DUBIOUS_OWNER: "1"
+          PIP_EXTRA_INDEX_URL: https://download.pytorch.org/whl/cu${{ matrix.cuda }}
         run: python${{ matrix.python }} -m build --wheel
  
       - name: Repair wheel

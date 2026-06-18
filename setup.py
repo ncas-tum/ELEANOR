@@ -18,6 +18,11 @@ def cuda_local_scheme(version):
         return f"+cu{cuda}"
     return ""
 
+def install_requires():
+    jax_extra = os.environ.get("JAX_EXTRA", "cpu")
+    jax_dep = "jax" if jax_extra == "cpu" else f"jax[{jax_extra}]"
+    return [jax_dep]
+
 def get_extensions():
     debug_mode = os.getenv("DEBUG", "0") == "1"
     use_cuda = os.getenv("USE_CUDA", "1" if torch.cuda.is_available() else "0") == "1"
@@ -65,5 +70,6 @@ setup(
     ext_modules=get_extensions(),
     cmdclass={"build_ext": BuildExtension},
     options={},
-    use_scm_version={"local_scheme": cuda_local_scheme}
+    use_scm_version={"local_scheme": cuda_local_scheme},
+    install_requires=install_requires()
 )
