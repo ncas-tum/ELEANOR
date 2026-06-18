@@ -20,8 +20,33 @@ def cuda_local_scheme(version):
 
 def install_requires():
     jax_extra = os.environ.get("JAX_EXTRA", "cpu")
-    jax_dep = "jax" if jax_extra == "cpu" else f"jax[{jax_extra}]"
-    return [jax_dep]
+    jax_dep = "jax>=0.10.0" if jax_extra == "cpu" else f"jax[{jax_extra}]>=0.10.0"
+    return [
+        "boilerplot@git+https://github.com/fehlings/boilerplot.git",
+        "datasets>=4.8.5",
+        "equinox>=0.13.8",
+        "flwr-datasets>=0.6.0",
+        "ipykernel>=7.2.0",
+        "ipywidgets>=8.1.8",
+        "jax-tqdm>=0.4.0",
+        "matplotlib>=3.10.9",
+        "mpi4py>=4.1.2",
+        "optax>=0.2.8",
+        "optuna>=4.8.0",
+        "optuna-dashboard>=0.20.0",
+        "orbax-checkpoint>=0.11.40",
+        "pandas>=3.0.3",
+        "scikit-learn>=1.8.0",
+        "seaborn>=0.13.2",
+        "snntorch>=0.9.4",
+        "spyx>=0.1.20",
+        "tensorboard>=2.20.0",
+        "tonic>=1.4.3",
+        "torch>=2.12.0",
+        "torchvision>=0.27.0",
+        "tqdm>=4.67.3",
+        jax_dep
+    ]
 
 def get_extensions():
     debug_mode = os.getenv("DEBUG", "0") == "1"
