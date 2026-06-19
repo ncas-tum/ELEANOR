@@ -22,6 +22,14 @@ def _scale_grad(x):
     return x, gradient
 
 
+def limexp(x):
+    thresh = 80
+    safe_x = jnp.minimum(x, thresh)
+    exp_branch = jnp.exp(safe_x)
+    linear_branch = jnp.exp(thresh) * (x - thresh + 1)
+    return jnp.where(x < thresh, exp_branch, linear_branch)
+
+
 @dataclass
 class HeraclesParams:
     """
@@ -210,14 +218,14 @@ class HeraclesCell(NeuronModel):
 
             E = v * cap_divider - p * depol_divider
             w_e = (E - self.params.e_off) * self.params.d_e
-            w_exp_down = jnp.exp(
+            w_exp_down = limexp(
                 -jax.nn.relu(self.params.w_b - w_e)
                 * self._q
                 / self._k
                 / self.params.temp
             )
             k_down = self._k * self.params.temp / self._h * w_exp_down
-            w_exp_up = jnp.exp(
+            w_exp_up = limexp(
                 -jax.nn.relu(self.params.w_b + w_e)
                 * self._q
                 / self._k
@@ -225,7 +233,7 @@ class HeraclesCell(NeuronModel):
             )
             k_up = self._k * self.params.temp / self._h * w_exp_up
 
-            dp = _scale_grad(2 * P_s * (k_down * (1 - prob) - k_up * prob))
+            dp = 2 * P_s * (k_down * (1 - prob) - k_up * prob)
             I_p = dp * A
 
             # FeLIF

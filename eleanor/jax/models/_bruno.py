@@ -3,6 +3,7 @@ from functools import partial
 from typing import Callable, Optional, Sequence
 
 import equinox as eqx
+import equinox.internal as eqxi
 import jax
 import jax.numpy as jnp
 import jax.random as jrand
@@ -138,7 +139,7 @@ class BrunoCell(NeuronModel):
     def __call__(
         self,
         state: Sequence[Array],
-        input: Array,
+        isyn: Array,
         *,
         key: Optional[PRNGKeyArray] = None,
     ):
@@ -150,7 +151,6 @@ class BrunoCell(NeuronModel):
         I_0 = self.I_0_var(self.params.I_0)
         t_hzo = self.t_hzo_var(self.params.t_hzo)
         t_int = self.t_int_var(self.params.t_int)
-        isyn = self.Iin_var(input)
 
         C_0 = self._eps0 * self.params.eps_hzo / t_hzo * A
         C_tot = C_0 + self.params.C_par
@@ -189,7 +189,7 @@ class BrunoCell(NeuronModel):
 
             return tau, lambda g: (g * tangent_E, g * tangent_E_a)
 
-        def micro_step(carry, _, step_dt=1e-3):
+        def micro_step(carry, isyn, step_dt=1e-3):
             s, v, p = carry
             E = v * cap_divider - p * depol_divider
 
@@ -213,7 +213,7 @@ class BrunoCell(NeuronModel):
         (_, v_inner, p_inner), _ = jax.lax.scan(
             partial(micro_step, step_dt=1.0 / self.n_steps),
             (jnp.zeros_like(v), v, p),
-            None,
+            jnp.repeat(isyn[None, ...], self.n_steps, axis=0),
             length=self.n_steps,
         )
         E = v * cap_divider - p * depol_divider
@@ -243,8 +243,14 @@ class BrunoCell(NeuronModel):
 
 
 class CheckpointCell(BrunoCell):
+    checkpoints: Optional[int] = eqx.field(static=True)
+
+    def __init__(self, *args, **kwargs):
+        self.checkpoints = kwargs.pop("checkpoints", None)
+        super(CheckpointCell, self).__init__(*args, **kwargs)
+
     def __call__(
-        self, state: Sequence[Array], input: Array, *, key: PRNGKeyArray | None = None
+        self, state: Sequence[Array], isyn: Array, *, key: PRNGKeyArray | None = None
     ):
         s, v, p = state
 
@@ -254,8 +260,6 @@ class CheckpointCell(BrunoCell):
         I_0 = self.I_0_var(self.params.I_0)
         t_hzo = self.t_hzo_var(self.params.t_hzo)
         t_int = self.t_int_var(self.params.t_int)
-
-        isyn = self.Iin_var(input)
 
         C_0 = self._eps0 * self.params.eps_hzo / t_hzo * A
         C_tot = C_0 + self.params.C_par
@@ -294,22 +298,50 @@ class CheckpointCell(BrunoCell):
 
             return tau, lambda g: (g * tangent_E, g * tangent_E_a)
 
-        E = v * cap_divider - p * depol_divider
+        def micro_step(carry, isyn, step_dt=1e-3):
+            s, v, p = carry
+            E = v * cap_divider - p * depol_divider
 
-        I_p_new = (jnp.sign(E) * P_s - p) * A * jax.lax.stop_gradient(tau_fn(E, E_a))
-        dp = I_p_new / A
-        p_new = jnp.clip(p + self.params.dt * dp, -P_s, P_s)
+            I_p_new = (
+                (jnp.sign(E) * P_s - p) * A * jax.lax.stop_gradient(tau_fn(E, E_a))
+            )
+            dp = I_p_new / A
+            p_new = jnp.clip(p + step_dt * self.params.dt * dp, -P_s, P_s)
 
-        I_leak = (
-            I_0 * A * jnp.expm1(v / self.params.V_t) + self.params.I_dsc
-        ) * jnp.sign(v)
-        dv = (isyn - I_leak - I_p_new) / C_tot
-        v_new = jnp.clip(v + self.params.dt * dv, -5, 5)
+            I_leak = (
+                I_0 * A * jnp.expm1(v / self.params.V_t) + self.params.I_dsc
+            ) * jnp.sign(v)
+            dv = (isyn - I_leak - I_p_new) / C_tot
+            v_new = jnp.clip(v + step_dt * self.params.dt * dv, -5, 5)
+
+            spikes_ref = jax.lax.stop_gradient(s)
+            v = (1 - spikes_ref) * v_new + spikes_ref * v
+            p = (1 - spikes_ref) * p_new + spikes_ref * p
+            s = self.spikefn(v - self.params.threshold)
+
+            return (s, v, p), None
+
+        if self.checkpoints is not None and self.checkpoints < 0:
+            (_, v, p), _ = jax.lax.scan(
+                partial(micro_step, step_dt=1.0 / self.n_steps),
+                (v, p, jnp.zeros_like(v)),
+                jnp.repeat(isyn[None, ...], self.n_steps, axis=0),
+                self.n_steps,
+            )
+        else:
+            (_, v, p), _ = eqxi.scan(
+                partial(micro_step, step_dt=1.0 / self.n_steps),
+                (v, p, jnp.zeros_like(v)),
+                jnp.repeat(isyn[None, ...], self.n_steps, axis=0),
+                self.n_steps,
+                kind="checkpointed",
+                checkpoints=self.checkpoints,
+            )
 
         spikes_ref = jax.lax.stop_gradient(s)
-        v = (1 - spikes_ref) * v_new - 1.5 * spikes_ref
-        p = (1 - spikes_ref) * p_new - (spikes_ref * P_s)  # 0.05308533)
-        s = self.spikefn(v_new - self.params.threshold)
+        v = (1 - spikes_ref) * v - 1.5 * spikes_ref
+        p = (1 - spikes_ref) * p - (spikes_ref * P_s)  # 0.05308533)
+        s = self.spikefn(v - self.params.threshold)
 
         if self.return_states:
             return (s, v, p), (s, v, p)

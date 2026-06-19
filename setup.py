@@ -12,11 +12,13 @@ from torch.utils.cpp_extension import (
 
 LIBRARY_NAME = "eleanor"
 
+
 def cuda_local_scheme(version):
     cuda = os.environ.get("CUDA_VERSION")
     if cuda and cuda != "cpu":
         return f"+cu{cuda}"
     return ""
+
 
 def install_requires():
     jax_extra = os.environ.get("JAX_EXTRA", "cpu")
@@ -45,8 +47,9 @@ def install_requires():
         "torch>=2.12.0",
         "torchvision>=0.27.0",
         "tqdm>=4.67.3",
-        jax_dep
+        jax_dep,
     ]
+
 
 def get_extensions():
     debug_mode = os.getenv("DEBUG", "0") == "1"
@@ -61,10 +64,7 @@ def get_extensions():
             "-fopenmp",
             "-fdiagnostics-color=always",
         ],
-        "nvcc": [
-            "-O3" if not debug_mode else "-O0",
-            '-U', 'Py_LIMITED_API'
-        ],
+        "nvcc": ["-O3" if not debug_mode else "-O0", "-U", "Py_LIMITED_API"],
     }
 
     extra_link_args = []
@@ -96,5 +96,5 @@ setup(
     cmdclass={"build_ext": BuildExtension},
     options={},
     use_scm_version={"local_scheme": cuda_local_scheme},
-    install_requires=install_requires()
+    install_requires=install_requires(),
 )
