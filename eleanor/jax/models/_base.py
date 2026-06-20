@@ -15,6 +15,13 @@ def default_floating_dtype():
         return jnp.float32
 
 
+def limexp(x):
+    safe_x = jnp.minimum(x, 80)
+    exp_branch = jnp.exp(safe_x)
+    linear_branch = jnp.exp(80) * (1 + (x - safe_x))
+    return jnp.where(x > 80, linear_branch, exp_branch)
+
+
 class NeuronModel(eqx.Module, ABC):
     """
     Base class for neuron models. All neuron models should inherit from this class and implement the `init_state` and `__call__` methods.

@@ -2,6 +2,8 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
+from eleanor.jax.models._base import limexp
+
 
 def _unbroadcast(grad, target_shape):
     """Sum-reduce ``grad`` so its shape matches ``target_shape``.
@@ -33,13 +35,13 @@ def tau_surr(alpha: float = 1.3, E_a: float = 1.0, soft_E: float = 1e-18):
 
         exponential = (E_a / (jnp.abs(E) + soft_E)) ** alpha
 
-        tau = 1 / (tau_p * jnp.exp(exponential))
+        tau = 1 / (tau_p * limexp(exponential))
 
         # Tau_p gradient
-        grad_tau_p = -jnp.exp(-exponential) / (tau_p**2)
+        grad_tau_p = -limexp(-exponential) / (tau_p**2)
 
         # E gradient
-        numerator = alpha * E * jnp.exp(-exponential) * exponential
+        numerator = alpha * E * limexp(-exponential) * exponential
         denumerator = soft_E * tau_p * jnp.abs(E) + E**2 * tau_p
         denumerator = jnp.where(
             jnp.abs(E) > 0.0,

@@ -12,7 +12,13 @@ from jaxtyping import Array, PRNGKeyArray
 from eleanor.jax.variability import D2DVar, StaticWrapper
 
 from ..surrogate import tanh_surrogate
-from ._base import NeuronModel, default_floating_dtype
+from ._base import NeuronModel, default_floating_dtype, limexp
+
+
+def safe_pow(base, alpha):
+    safe_base = jnp.where(base == 0, 1.0, base)
+    result = safe_base**alpha
+    return jnp.where(base == 0, 0.0, result)
 
 
 @dataclass
@@ -165,29 +171,40 @@ class BrunoCell(NeuronModel):
             / (t_hzo * self.params.eps_int + t_int * self.params.eps_hzo)
         )
 
-        @jax.custom_gradient
+        @jax.custom_jvp
         def tau_fn(E, E_a):
-            tau = 1 / (
+            return 1 / (
                 self.params.tau_0
-                * jnp.exp(
-                    (E_a / (jnp.abs(E) + self.params.soft_E)) ** self.params.alpha
-                )
+                * limexp((E_a / (jnp.abs(E) + self.params.soft_E)) ** self.params.alpha)
             )
 
-            exponential = (E_a / (jnp.abs(E) + self.params.soft_E)) ** self.params.alpha
-            numerator = self.params.alpha * jnp.exp(-exponential) * exponential
+        @tau_fn.defjvp
+        def tau_fn_jvp(primals, tangents):
+            E, E_a = primals
+            dE, dE_a = tangents
+            tau = tau_fn(E, E_a)
+
+            exponential = safe_pow(
+                E_a / (jnp.abs(E) + self.params.soft_E), self.params.alpha
+            )
+            numerator = self.params.alpha * limexp(-exponential) * exponential
+
+            safe_E = jax.lax.stop_gradient(E)
             denumerator = (
-                self.params.tau_0 * self.params.soft_E * jnp.abs(E)
-                + self.params.tau_0 * E**2
+                self.params.tau_0 * self.params.soft_E * jnp.abs(safe_E)
+                + self.params.tau_0 * safe_E**2
             )
-            denumerator = jnp.where(
-                denumerator, denumerator, 1.0
-            )  # If E is 0 then tangent_E is 0
 
-            tangent_E = (E * numerator) / denumerator
-            tangent_E_a = -numerator / (self.params.tau_0 * E_a)
+            safe_denom = jnp.where(E == 0, 1.0, denumerator)
+            dtau_dE = jnp.where(E == 0, 0.0, (E * numerator) / safe_denom)
 
-            return tau, lambda g: (g * tangent_E, g * tangent_E_a)
+            safe_E_a = jnp.where(E_a == 0, 1.0, E_a)
+            dtau_dE_a = jnp.where(
+                E_a == 0, 0.0, -numerator / (self.params.tau_0 * safe_E_a)
+            )
+
+            tangent_out = dtau_dE * dE + dtau_dE_a * dE_a
+            return tau, tangent_out
 
         def micro_step(carry, isyn, step_dt=1e-3):
             s, v, p = carry
@@ -218,11 +235,11 @@ class BrunoCell(NeuronModel):
         )
         E = v * cap_divider - p * depol_divider
 
-        I_p_new = (jnp.sign(E) * P_s - p) * A * jax.lax.stop_gradient(tau_fn(E, E_a))
+        I_p_new = (jnp.sign(E) * P_s - p) * A * tau_fn(E, E_a)
         dp = I_p_new / A
         p_outer = jnp.clip(p + self.params.dt * dp, -P_s, P_s)
 
-        I_leak = (
+        I_leak = jax.lax.stop_gradient(
             I_0 * A * jnp.expm1(v / self.params.V_t) + self.params.I_dsc
         ) * jnp.sign(v)
         dv = (isyn - I_leak - I_p_new) / C_tot
@@ -274,41 +291,50 @@ class CheckpointCell(BrunoCell):
             / (t_hzo * self.params.eps_int + t_int * self.params.eps_hzo)
         )
 
-        @jax.custom_gradient
+        @jax.custom_jvp
         def tau_fn(E, E_a):
-            tau = 1 / (
+            return 1 / (
                 self.params.tau_0
-                * jnp.exp(
-                    (E_a / (jnp.abs(E) + self.params.soft_E)) ** self.params.alpha
-                )
+                * limexp((E_a / (jnp.abs(E) + self.params.soft_E)) ** self.params.alpha)
             )
 
-            exponential = (E_a / (jnp.abs(E) + self.params.soft_E)) ** self.params.alpha
-            numerator = self.params.alpha * jnp.exp(-exponential) * exponential
+        @tau_fn.defjvp
+        def tau_fn_jvp(primals, tangents):
+            E, E_a = primals
+            dE, dE_a = tangents
+            tau = tau_fn(E, E_a)
+
+            exponential = safe_pow(
+                E_a / (jnp.abs(E) + self.params.soft_E), self.params.alpha
+            )
+            numerator = self.params.alpha * limexp(-exponential) * exponential
+
+            safe_E = jax.lax.stop_gradient(E)
             denumerator = (
-                self.params.tau_0 * self.params.soft_E * jnp.abs(E)
-                + self.params.tau_0 * E**2
+                self.params.tau_0 * self.params.soft_E * jnp.abs(safe_E)
+                + self.params.tau_0 * safe_E**2
             )
-            denumerator = jnp.where(
-                denumerator, denumerator, 1.0
-            )  # If E is 0 then tangent_E is 0
 
-            tangent_E = (E * numerator) / denumerator
-            tangent_E_a = -numerator / (self.params.tau_0 * E_a)
+            safe_denom = jnp.where(E == 0, 1.0, denumerator)
+            dtau_dE = jnp.where(E == 0, 0.0, (E * numerator) / safe_denom)
 
-            return tau, lambda g: (g * tangent_E, g * tangent_E_a)
+            safe_E_a = jnp.where(E_a == 0, 1.0, E_a)
+            dtau_dE_a = jnp.where(
+                E_a == 0, 0.0, -numerator / (self.params.tau_0 * safe_E_a)
+            )
+
+            tangent_out = dtau_dE * dE + dtau_dE_a * dE_a
+            return tau, tangent_out
 
         def micro_step(carry, isyn, step_dt=1e-3):
             s, v, p = carry
             E = v * cap_divider - p * depol_divider
 
-            I_p_new = (
-                (jnp.sign(E) * P_s - p) * A * jax.lax.stop_gradient(tau_fn(E, E_a))
-            )
+            I_p_new = (jnp.sign(E) * P_s - p) * A * tau_fn(E, E_a)
             dp = I_p_new / A
             p_new = jnp.clip(p + step_dt * self.params.dt * dp, -P_s, P_s)
 
-            I_leak = (
+            I_leak = jax.lax.stop_gradient(
                 I_0 * A * jnp.expm1(v / self.params.V_t) + self.params.I_dsc
             ) * jnp.sign(v)
             dv = (isyn - I_leak - I_p_new) / C_tot

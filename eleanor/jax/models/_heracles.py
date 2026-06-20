@@ -11,7 +11,7 @@ from jaxtyping import Array, PRNGKeyArray
 from eleanor.jax.variability import D2DVar, StaticWrapper
 
 from ..surrogate import tanh_surrogate
-from ._base import NeuronModel, default_floating_dtype
+from ._base import NeuronModel, default_floating_dtype, limexp
 
 
 @jax.custom_gradient
@@ -20,14 +20,6 @@ def _scale_grad(x):
         return 1e-3 * g
 
     return x, gradient
-
-
-def limexp(x):
-    thresh = 80
-    safe_x = jnp.minimum(x, thresh)
-    exp_branch = jnp.exp(safe_x)
-    linear_branch = jnp.exp(thresh) * (x - thresh + 1)
-    return jnp.where(x < thresh, exp_branch, linear_branch)
 
 
 @dataclass
@@ -188,9 +180,9 @@ class HeraclesCell(NeuronModel):
             / (t_fe * self.params.eps_depl + w_depl * self.params.eps_fe)
         )
 
-        C_tot = jax.lax.stop_gradient(C_tot)
-        cap_divider = jax.lax.stop_gradient(cap_divider)
-        depol_divider = jax.lax.stop_gradient(depol_divider)
+        # C_tot = jax.lax.stop_gradient(C_tot)
+        # cap_divider = jax.lax.stop_gradient(cap_divider)
+        # depol_divider = jax.lax.stop_gradient(depol_divider)
 
         return prob, C_tot, cap_divider, depol_divider
 

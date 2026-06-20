@@ -8,7 +8,7 @@ from jaxtyping import Array, PRNGKeyArray
 
 from ..surrogate import tanh_surrogate, tau_surr
 from ..variability import D2DVar, StaticWrapper
-from ._base import NeuronModel, default_floating_dtype
+from ._base import NeuronModel, default_floating_dtype, limexp
 
 
 @dataclass
@@ -106,8 +106,8 @@ class FeLIFCell(NeuronModel):
 
         E = v * self.params.alpha - p * self.params.beta
         tau = self._tau_fn(E, tau_p)
-        gamma_p = jnp.exp(-self.params.dt * tau)
-        gamma = jnp.exp(-self.params.dt / tau_m)
+        gamma_p = limexp(-self.params.dt * tau)
+        gamma = limexp(-self.params.dt / tau_m)
 
         Ip = P_s * (jnp.sign(E) - p) * self.params.dt * tau
         p = gamma_p * p + (1 - gamma_p) * jnp.sign(E)
