@@ -15,11 +15,32 @@ from ..surrogate import tanh_surrogate
 from ._base import NeuronModel, default_floating_dtype, limexp
 
 
-def safe_pow(base, alpha):
-    safe_base = jnp.where(base == 0, 1.0, base)
-    result = safe_base**alpha
-    return jnp.where(base == 0, 0.0, result)
+@jax.custom_jvp
+def _tau_fn(tau_0, E_a, E, soft_E, alpha):
+    return limexp(-(E_a / (jnp.abs(E) + soft_E)) ** alpha) / tau_0
 
+@_tau_fn.defjvp
+def _tau_fn_jvp(primals, tangents):
+    a, b, c, d, e = primals
+    dTau0, dE_a, dE, dSoft_E, dAlpha = tangents
+    
+    X = d + jnp.abs(c)
+    inner = (b/X)**e
+    exp_neg = limexp(-inner)
+    K = inner * exp_neg / a
+
+    tau = exp_neg / a
+
+    dtau_tau0 = -exp_neg/a**2
+    dtau_E_a = jnp.where(b > 0, -e*K / b, 0.0)
+    dtau_E = jnp.sign(c) * e * K / X
+    dtau_soft_E = e * K / X
+
+    log_ration = jnp.where(b > 0, jnp.log(b/X), 0.0)
+    dtau_alpha = jnp.where(b > 0, -K*log_ration, 0.0)
+
+    tangent_out = dtau_tau0 * dTau0 + dtau_E_a * dE_a + dtau_E * dE + dtau_soft_E * dSoft_E + dtau_alpha * dAlpha
+    return tau, tangent_out
 
 @dataclass
 class BrunoParams:
@@ -57,6 +78,8 @@ class BrunoCell(NeuronModel):
     spikefn: Callable[[Array], Array] = eqx.field(static=True)
     n_steps: int = eqx.field(static=True)
     return_states: bool = eqx.field(static=True)
+    stop_tau_grad: bool = eqx.field(static=True)
+    stop_reset_grad: bool = eqx.field(static=True)
 
     A_var: StaticWrapper
     E_a_var: StaticWrapper
@@ -76,6 +99,8 @@ class BrunoCell(NeuronModel):
         dtype=None,
         n_steps=1000,
         return_states: bool = False,
+        stop_tau_grad: bool = True,
+        stop_reset_grad: bool = True,
         *,
         key: PRNGKeyArray,
     ):
@@ -85,6 +110,8 @@ class BrunoCell(NeuronModel):
         self.shape = shape
         self.spikefn = spikefn
         self.return_states = return_states
+        self.stop_tau_grad = stop_tau_grad
+        self.stop_reset_grad = stop_reset_grad
 
         self._eps0 = 8.85418792394420013968e-12 * param_scale
 
@@ -171,46 +198,12 @@ class BrunoCell(NeuronModel):
             / (t_hzo * self.params.eps_int + t_int * self.params.eps_hzo)
         )
 
-        @jax.custom_jvp
-        def tau_fn(E, E_a):
-            return 1 / (
-                self.params.tau_0
-                * limexp((E_a / (jnp.abs(E) + self.params.soft_E)) ** self.params.alpha)
-            )
-
-        @tau_fn.defjvp
-        def tau_fn_jvp(primals, tangents):
-            E, E_a = primals
-            dE, dE_a = tangents
-            tau = tau_fn(E, E_a)
-
-            exponential = safe_pow(
-                E_a / (jnp.abs(E) + self.params.soft_E), self.params.alpha
-            )
-            numerator = self.params.alpha * limexp(-exponential) * exponential
-
-            safe_E = jax.lax.stop_gradient(E)
-            denumerator = (
-                self.params.tau_0 * self.params.soft_E * jnp.abs(safe_E)
-                + self.params.tau_0 * safe_E**2
-            )
-
-            safe_denom = jnp.where(E == 0, 1.0, denumerator)
-            dtau_dE = jnp.where(E == 0, 0.0, (E * numerator) / safe_denom)
-
-            safe_E_a = jnp.where(E_a == 0, 1.0, E_a)
-            dtau_dE_a = jnp.where(
-                E_a == 0, 0.0, -numerator / (self.params.tau_0 * safe_E_a)
-            )
-
-            tangent_out = dtau_dE * dE + dtau_dE_a * dE_a
-            return tau, tangent_out
-
         def micro_step(carry, isyn, step_dt=1e-3):
             s, v, p = carry
             E = v * cap_divider - p * depol_divider
 
-            I_p_new = (jnp.sign(E) * P_s - p) * A * tau_fn(E, E_a)
+            tau = _tau_fn(self.params.tau_0, E_a, E, self.params.soft_E, self.params.alpha)
+            I_p_new = (jnp.sign(E) * P_s - p) * A * tau
             dp = I_p_new / A
             p_new = jnp.clip(p + step_dt * self.params.dt * dp, -P_s, P_s)
 
@@ -220,9 +213,8 @@ class BrunoCell(NeuronModel):
             dv = (isyn - I_leak - I_p_new) / C_tot
             v_new = jnp.clip(v + step_dt * self.params.dt * dv, -5, 5)
 
-            spikes_ref = jax.lax.stop_gradient(s)
-            v = (1 - spikes_ref) * v_new + spikes_ref * v
-            p = (1 - spikes_ref) * p_new + spikes_ref * p
+            v = (1 - s) * v_new + s * v
+            p = (1 - s) * p_new + s * p
             s = self.spikefn(v - self.params.threshold)
 
             return (s, v, p), None
@@ -235,11 +227,15 @@ class BrunoCell(NeuronModel):
         )
         E = v * cap_divider - p * depol_divider
 
-        I_p_new = (jnp.sign(E) * P_s - p) * A * jax.lax.stop_gradient(tau_fn(E, E_a))
+        tau = _tau_fn(self.params.tau_0, E_a, E, self.params.soft_E, self.params.alpha)
+        if self.stop_tau_grad:
+            tau = jax.lax.stop_gradient(tau)
+        
+        I_p_new = (jnp.sign(E) * P_s - p) * A * tau
         dp = I_p_new / A
         p_outer = jnp.clip(p + self.params.dt * dp, -P_s, P_s)
 
-        I_leak = jax.lax.stop_gradient(
+        I_leak = (
             I_0 * A * jnp.expm1(v / self.params.V_t) + self.params.I_dsc
         ) * jnp.sign(v)
         dv = (isyn - I_leak - I_p_new) / C_tot
@@ -248,7 +244,11 @@ class BrunoCell(NeuronModel):
         v = v_outer + jax.lax.stop_gradient(v_inner - v_outer)
         p = p_outer + jax.lax.stop_gradient(p_inner - p_outer)
 
-        spikes_ref = jax.lax.stop_gradient(s)
+        if self.stop_reset_grad:
+            spikes_ref = jax.lax.stop_gradient(s)
+        else:
+            spikes_ref = s
+        
         v = (1 - spikes_ref) * v - 1.5 * spikes_ref
         p = (1 - spikes_ref) * p - (spikes_ref * P_s)
         s = self.spikefn(v - self.params.threshold)
@@ -291,56 +291,29 @@ class CheckpointCell(BrunoCell):
             / (t_hzo * self.params.eps_int + t_int * self.params.eps_hzo)
         )
 
-        @jax.custom_jvp
-        def tau_fn(E, E_a):
-            return 1 / (
-                self.params.tau_0
-                * limexp((E_a / (jnp.abs(E) + self.params.soft_E)) ** self.params.alpha)
-            )
-
-        @tau_fn.defjvp
-        def tau_fn_jvp(primals, tangents):
-            E, E_a = primals
-            dE, dE_a = tangents
-            tau = tau_fn(E, E_a)
-
-            exponential = safe_pow(
-                E_a / (jnp.abs(E) + self.params.soft_E), self.params.alpha
-            )
-            numerator = self.params.alpha * limexp(-exponential) * exponential
-
-            safe_E = jax.lax.stop_gradient(E)
-            denumerator = (
-                self.params.tau_0 * self.params.soft_E * jnp.abs(safe_E)
-                + self.params.tau_0 * safe_E**2
-            )
-
-            safe_denom = jnp.where(E == 0, 1.0, denumerator)
-            dtau_dE = jnp.where(E == 0, 0.0, (E * numerator) / safe_denom)
-
-            safe_E_a = jnp.where(E_a == 0, 1.0, E_a)
-            dtau_dE_a = jnp.where(
-                E_a == 0, 0.0, -numerator / (self.params.tau_0 * safe_E_a)
-            )
-
-            tangent_out = dtau_dE * dE + dtau_dE_a * dE_a
-            return tau, tangent_out
-
         def micro_step(carry, isyn, step_dt=1e-3):
             s, v, p = carry
             E = v * cap_divider - p * depol_divider
 
-            I_p_new = (jnp.sign(E) * P_s - p) * A * tau_fn(E, E_a)
+            tau = _tau_fn(self.params.tau_0, E_a, E, self.params.soft_E, self.params.alpha)
+            if self.stop_tau_grad:
+                tau = jax.lax.stop_gradient(tau)
+
+            I_p_new = (jnp.sign(E) * P_s - p) * A * tau
             dp = I_p_new / A
             p_new = jnp.clip(p + step_dt * self.params.dt * dp, -P_s, P_s)
 
-            I_leak = jax.lax.stop_gradient(
+            I_leak = (
                 I_0 * A * jnp.expm1(v / self.params.V_t) + self.params.I_dsc
             ) * jnp.sign(v)
             dv = (isyn - I_leak - I_p_new) / C_tot
             v_new = jnp.clip(v + step_dt * self.params.dt * dv, -5, 5)
 
-            spikes_ref = jax.lax.stop_gradient(s)
+            if self.stop_reset_grad:
+                spikes_ref = jax.lax.stop_gradient(s)
+            else:
+                spikes_ref = s
+
             v = (1 - spikes_ref) * v_new + spikes_ref * v
             p = (1 - spikes_ref) * p_new + spikes_ref * p
             s = self.spikefn(v - self.params.threshold)
@@ -364,7 +337,10 @@ class CheckpointCell(BrunoCell):
                 checkpoints=self.checkpoints,
             )
 
-        spikes_ref = jax.lax.stop_gradient(s)
+        if self.stop_reset_grad:
+            spikes_ref = jax.lax.stop_gradient(s)
+        else:
+            spikes_ref = s
         v = (1 - spikes_ref) * v - 1.5 * spikes_ref
         p = (1 - spikes_ref) * p - (spikes_ref * P_s)  # 0.05308533)
         s = self.spikefn(v - self.params.threshold)
