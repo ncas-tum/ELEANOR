@@ -47,6 +47,7 @@ def install_requires():
         "torch>=2.12.0",
         "torchvision>=0.27.0",
         "tqdm>=4.67.3",
+        "tyro",
         jax_dep,
     ]
 
@@ -55,6 +56,9 @@ def get_extensions():
     debug_mode = os.getenv("DEBUG", "0") == "1"
     use_cuda = os.getenv("USE_CUDA", "1" if torch.cuda.is_available() else "0") == "1"
     use_cuda = use_cuda and torch.cuda.is_available() and CUDA_HOME is not None
+    cuda_tag = os.environ.get("CUDA_VERSION", "cpu")
+    cuda_tag = cuda_tag.replace(".", "") if cuda_tag != "cpu" else "cpu"
+    ext_name = f"{LIBRARY_NAME}.torch.models._C_cu{cuda_tag}" if cuda_tag != "cpu" else f"{LIBRARY_NAME}.torch.models._C_cpu"
 
     extension = CUDAExtension if use_cuda else CppExtension
 
@@ -81,7 +85,7 @@ def get_extensions():
 
     return [
         extension(
-            f"{LIBRARY_NAME}.torch.models._C",
+            ext_name,
             sources,
             extra_compile_args=extra_compile_args,
             extra_link_args=extra_link_args,

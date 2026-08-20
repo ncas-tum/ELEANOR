@@ -3,8 +3,7 @@ name = "eleanor"
 dynamic = ["version", "dependencies"]
 description = "Python package to simulate FeLIF neurons"
 readme = {file = "README.md", content-type = "text/markdown"}
-license = "MIT"
-license-files = ["LICENSE.txt"]
+license = {file = "LICENSE.txt"}
 requires-python = ">=3.11"
 authors = [
   { name = "Fernando M. Quintana Velázquez", email = "fernando.quintana@tum.de" },
@@ -35,7 +34,7 @@ Issues = "https://github.com/ncas-tum/ELEANOR/issues"
 
 [project.optional-dependencies]
 mps = ["jax-mps>=0.10.0"]
-cuda12 = ["jax[cuda13]"]
+cuda12 = ["jax[cuda12]"]
 cuda13 = ["jax[cuda13]"]
 
 [tool.setuptools]
