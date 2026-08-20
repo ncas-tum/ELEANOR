@@ -32,7 +32,7 @@ def loadBraille(nb_upsample, nb_repetitions, full=False, *, key=None):
     from zipfile import ZipFile
 
     file_name = Path(
-        "/Users/ferqui/TUM/ELEANOR/scripts/maleficent/data/braille/data/data_braille_letters_raw"
+        "/tmp/data/braille/data/data_braille_letters_raw"
     )
     if not file_name.exists():
         resp = urlopen(
@@ -41,7 +41,7 @@ def loadBraille(nb_upsample, nb_repetitions, full=False, *, key=None):
         with ZipFile(BytesIO(resp.read())) as zObject:
             zObject.extract(
                 "data/data_braille_letters_raw",
-                path="/Users/ferqui/TUM/ELEANOR/scripts/maleficent/data/braille",
+                path="/tmp/data/braille",
             )
 
     with open(file_name, "rb") as infile:
