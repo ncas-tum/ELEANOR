@@ -31,9 +31,7 @@ def loadBraille(nb_upsample, nb_repetitions, full=False, *, key=None):
     from urllib.request import urlopen
     from zipfile import ZipFile
 
-    file_name = Path(
-        "/tmp/data/braille/data/data_braille_letters_raw"
-    )
+    file_name = Path("/tmp/data/braille/data/data_braille_letters_raw")
     if not file_name.exists():
         resp = urlopen(
             "https://zenodo.org/records/6556273/files/reading_braille_data.zip"

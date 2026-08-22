@@ -1,4 +1,4 @@
-from typing import Sequence
+from collections.abc import Sequence
 
 import numpy as np
 import torch
@@ -116,10 +116,10 @@ class FeLIF(SpikingNeuron):
                 "while `init_hidden=True`"
             )
 
-        if not self.pol.shape == input_.shape:
+        if self.pol.shape != input_.shape:
             self.pol = torch.full_like(input_, -self.P_s, device=self.pol.device)
 
-        if not self.mem.shape == input_.shape:
+        if self.mem.shape != input_.shape:
             self.mem = torch.zeros_like(input_, device=self.mem.device)
 
         self.reset = self.mem_reset(self.mem)

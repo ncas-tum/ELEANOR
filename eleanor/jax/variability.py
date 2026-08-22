@@ -1,5 +1,6 @@
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Generic, Sequence, TypeVar
+from typing import Generic, TypeVar
 
 import equinox as eqx
 import jax

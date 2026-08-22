@@ -1,4 +1,4 @@
-from typing import Sequence
+from collections.abc import Sequence
 
 import torch
 from snntorch import SpikingNeuron
@@ -52,9 +52,7 @@ def _(
 
 def _backward(ctx, grads):
     grad_v_out, grad_p_out = grads
-    current, v, p, cap_divider, depol_divider, P_s, A, I_0, E_a, C_tot = (
-        ctx.saved_tensors
-    )
+    _, v, p, cap_divider, depol_divider, P_s, A, I_0, E_a, C_tot = ctx.saved_tensors
     grad_I, grad_v, grad_p = None, None, None
 
     E = cap_divider * v - depol_divider * p
@@ -68,7 +66,7 @@ def _backward(ctx, grads):
     denumerator = ctx.tau_0 * ctx.soft_E * torch.abs(E) + ctx.tau_0 * E**2
     denumerator = torch.where(torch.abs(denumerator) > 0, denumerator, 1.0)
     tangent_E = (E * numerator) / denumerator
-    tangent_E = tangent_E
+    # tangent_E = tangent_E
 
     dI_pdp = -A * I_pb - I_pa * tangent_E * depol_divider
     dIldv = I_0 * A * torch.exp(v / ctx.V_t) * torch.sign(v) / ctx.V_t
@@ -127,7 +125,7 @@ def _setup_context(ctx, inputs, output):
         alpha,
         threshold,
         dt,
-        nsteps,
+        _,
     ) = inputs
 
     ctx.save_for_backward(
@@ -334,10 +332,10 @@ class Bruno(SpikingNeuron):
             shape = input_.shape
         P_s = self.P_s_var(self.P_s, shape)
 
-        if not self.pol.shape == input_.shape:
+        if self.pol.shape != input_.shape:
             self.pol = torch.zeros_like(input_, device=self.pol.device) - P_s
 
-        if not self.mem.shape == input_.shape:
+        if self.mem.shape != input_.shape:
             self.mem = torch.zeros_like(input_, device=self.mem.device)
 
         self.reset = self.mem_reset(self.mem)

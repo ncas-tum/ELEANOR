@@ -58,7 +58,11 @@ def get_extensions():
     use_cuda = use_cuda and torch.cuda.is_available() and CUDA_HOME is not None
     cuda_tag = os.environ.get("CUDA_VERSION", "cpu")
     cuda_tag = cuda_tag.replace(".", "") if cuda_tag != "cpu" else "cpu"
-    ext_name = f"{LIBRARY_NAME}.torch.models._C_cu{cuda_tag}" if cuda_tag != "cpu" else f"{LIBRARY_NAME}.torch.models._C_cpu"
+    ext_name = (
+        f"{LIBRARY_NAME}.torch.models._C_cu{cuda_tag}"
+        if cuda_tag != "cpu"
+        else f"{LIBRARY_NAME}.torch.models._C_cpu"
+    )
 
     extension = CUDAExtension if use_cuda else CppExtension
 

@@ -1,6 +1,6 @@
 import torch
-import torch.nn as nn
 from snntorch.functional import probe
+from torch import nn
 
 
 class TwoPhasePlasticity(nn.Module):
@@ -60,7 +60,7 @@ class TwoPhasePlasticity(nn.Module):
         torch.nn.init.constant_(self.synapse.weight.data, self.beta * self.v_h0)
 
     def reset(self):
-        super(TwoPhasePlasticity, self).reset()
+        super().reset()
         self.in_spike_monitor.clear_recorded_data()
         self.out_spike_monitor.clear_recorded_data()
 
@@ -85,18 +85,18 @@ class TwoPhasePlasticity(nn.Module):
                 out_spike = out_spike[0]
 
             trace_shape = out_spike.shape + (in_spike.shape[1],)
-            if not self.i_ca.shape == trace_shape:
+            if self.i_ca.shape != trace_shape:
                 self.i_ca = (
                     torch.zeros(trace_shape, device=self.i_ca.device) + self.ica_0
                 )
 
-            if not self.v_h.shape == trace_shape:
+            if self.v_h.shape != trace_shape:
                 self.v_h = torch.zeros(trace_shape, device=self.v_h.device) + self.v_h0
 
-            if not self.z_ji.shape == trace_shape:
+            if self.z_ji.shape != trace_shape:
                 self.z_ji = torch.zeros(trace_shape, device=self.z_ji.device) + self.z_0
 
-            if not self.p_i.shape == out_spike.shape:
+            if self.p_i.shape != out_spike.shape:
                 self.p_i = torch.zeros(out_spike.shape, device=self.p_i.device)
 
             # Calcium part ---------------------------------------------------------

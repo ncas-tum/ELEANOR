@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Literal, Optional, Union
+from typing import Literal
 
 import equinox as eqx
 import jax
@@ -36,7 +36,7 @@ def quantize_weights(
     preserve_zero: bool = True,
     preserve_max_val: bool = False,
     stochastic: bool = True,
-    key: Optional[PRNGKeyArray] = None,
+    key: PRNGKeyArray | None = None,
 ) -> Array:
     """
     Quantize weights to a specified bit precision. It can apply
@@ -100,8 +100,8 @@ class QuantizedLinear(eqx.nn.Linear):
 
     def __init__(
         self,
-        in_features: Union[int, Literal["scalar"]],
-        out_features: Union[int, Literal["scalar"]],
+        in_features: int | Literal["scalar"],
+        out_features: int | Literal["scalar"],
         use_bias: bool = True,
         dtype=None,
         quant_bits: int = 8,
@@ -138,14 +138,12 @@ class QuantizedLinear(eqx.nn.Linear):
         Likewise `out_features` can also be a string `"scalar"`, in which case the
         output from the layer will have shape `()`.
         """
-        super(QuantizedLinear, self).__init__(
-            in_features, out_features, use_bias, dtype, key=key
-        )
+        super().__init__(in_features, out_features, use_bias, dtype, key=key)
         self.quant_bits = quant_bits
         self.stochastic = stochastic
 
     @jax.named_scope("eleanor.weight_quantization.QuantizedLinear")
-    def __call__(self, x: Array, *, key: Optional[PRNGKeyArray] = None) -> Array:
+    def __call__(self, x: Array, *, key: PRNGKeyArray | None = None) -> Array:
         """
         Parameters
         ---------

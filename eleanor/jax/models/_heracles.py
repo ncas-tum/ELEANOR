@@ -1,6 +1,6 @@
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import partial
-from typing import Callable, Optional, Sequence
 
 import equinox as eqx
 import jax
@@ -74,7 +74,7 @@ class HeraclesCell(NeuronModel):
     def __init__(
         self,
         shape: Sequence[int],
-        params: Optional[HeraclesParams] = None,
+        params: HeraclesParams | None = None,
         param_scale: float = 1e12,
         variability: float = 0.0,
         spike_fn: Callable[[Array], Array] = tanh_surrogate,
@@ -192,7 +192,7 @@ class HeraclesCell(NeuronModel):
         state: Sequence[Array],
         synaptic_input: Array,
         *,
-        key: Optional[PRNGKeyArray] = None,
+        key: PRNGKeyArray | None = None,
     ):
         spikes, v, p = state
 

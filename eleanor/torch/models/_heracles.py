@@ -1,4 +1,4 @@
-from typing import Sequence
+from collections.abc import Sequence
 
 import torch
 from snntorch import SpikingNeuron
@@ -87,35 +87,7 @@ def _backward(ctx, grads):
 
 def _setup_context(ctx, inputs, output):
     """Setup context for backward pass"""
-    (
-        synaptic_input,
-        v,
-        p,
-        A,
-        t_fe,
-        eps_fe,
-        eps_depl,
-        q_fix_depl,
-        n_depl,
-        e_off,
-        temp,
-        w_b,
-        d_e,
-        P_s,
-        I_0,
-        V_t,
-        C_par,
-        C_fe,
-        I_dsc,
-        _eps0,
-        _q,
-        _k,
-        _h,
-        threshold,
-        dt,
-        paramsScale,
-        nsteps,
-    ) = inputs
+    synaptic_input, v, p, *_ = inputs
 
     # Save tensors for backward
     ctx.save_for_backward(synaptic_input, v, p)
@@ -181,7 +153,7 @@ class Heracles(SpikingNeuron):
         t_fe = t_fe * paramsScale
         # eps_depl = eps_depl * paramsScale
         # eps_fe = eps_fe * paramsScale
-        q_fix_depl = q_fix_depl  # * paramsScale
+        # q_fix_depl = q_fix_depl  # * paramsScale
         e_off = e_off / paramsScale
         d_e = d_e * paramsScale
         C_par = C_par * paramsScale
@@ -454,10 +426,10 @@ class Heracles(SpikingNeuron):
             shape = input_.shape
         P_s = self.P_s_var(self.P_s, shape)
 
-        if not self.pol.shape == input_.shape:
+        if self.pol.shape != input_.shape:
             self.pol = torch.zeros_like(input_, device=self.pol.device) - P_s
 
-        if not self.mem.shape == input_.shape:
+        if self.mem.shape != input_.shape:
             self.mem = torch.zeros_like(input_, device=self.mem.device)
 
         self.reset = self.mem_reset(self.mem)

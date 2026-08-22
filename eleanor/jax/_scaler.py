@@ -1,5 +1,3 @@
-from typing import Optional
-
 import equinox as eqx
 import jax
 from jax import custom_jvp
@@ -29,8 +27,7 @@ class Scaler(eqx.Module):
             self.grad_scale = grad_scale
 
     @jax.named_scope("eleanor.models.Scaler")
-    def __call__(self, x: Array, *, key: Optional[PRNGKeyArray] = None) -> Array:
-        """ """
+    def __call__(self, x: Array, *, key: PRNGKeyArray | None = None) -> Array:
 
         @custom_jvp
         def ste(x):

@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import Sequence, overload
+from collections.abc import Sequence
+from typing import overload
 
 import equinox as eqx
 import jax

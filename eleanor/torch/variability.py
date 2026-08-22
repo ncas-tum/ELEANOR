@@ -1,4 +1,4 @@
-from typing import Sequence
+from collections.abc import Sequence
 
 import torch
 
@@ -122,7 +122,7 @@ class D2DVar(torch.nn.Module):
     _rval: torch.Tensor
 
     def __init__(self, name: str, variability: float):
-        super(D2DVar, self).__init__()
+        super().__init__()
 
         self.name = name
         self.variability = variability
@@ -170,7 +170,7 @@ class D2DVar(torch.nn.Module):
         torch.Tensor with coefficient of variation
         :math:`\\text{variability} = \\sigma/\\mu`
         """
-        if not self._rval.shape == shape:
+        if self._rval.shape != shape:
             self.update_variability(shape)
 
         return mu * (1 + self.variability * self._rval)
@@ -195,7 +195,7 @@ class C2CVar(torch.nn.Module):
     """
 
     def __init__(self, name: str, variability: float):
-        super(C2CVar, self).__init__()
+        super().__init__()
 
         self.name = name
         self.variability = variability

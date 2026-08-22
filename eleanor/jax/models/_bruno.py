@@ -1,6 +1,6 @@
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import partial
-from typing import Callable, Optional, Sequence
 
 import equinox as eqx
 import equinox.internal as eqxi
@@ -17,30 +17,38 @@ from ._base import NeuronModel, default_floating_dtype, limexp
 
 @jax.custom_jvp
 def _tau_fn(tau_0, E_a, E, soft_E, alpha):
-    return limexp(-(E_a / (jnp.abs(E) + soft_E)) ** alpha) / tau_0
+    return limexp(-((E_a / (jnp.abs(E) + soft_E)) ** alpha)) / tau_0
+
 
 @_tau_fn.defjvp
 def _tau_fn_jvp(primals, tangents):
     a, b, c, d, e = primals
     dTau0, dE_a, dE, dSoft_E, dAlpha = tangents
-    
+
     X = d + jnp.abs(c)
-    inner = (b/X)**e
+    inner = (b / X) ** e
     exp_neg = limexp(-inner)
     K = inner * exp_neg / a
 
     tau = exp_neg / a
 
-    dtau_tau0 = -exp_neg/a**2
-    dtau_E_a = jnp.where(b > 0, -e*K / b, 0.0)
+    dtau_tau0 = -exp_neg / a**2
+    dtau_E_a = jnp.where(b > 0, -e * K / b, 0.0)
     dtau_E = jnp.sign(c) * e * K / X
     dtau_soft_E = e * K / X
 
-    log_ration = jnp.where(b > 0, jnp.log(b/X), 0.0)
-    dtau_alpha = jnp.where(b > 0, -K*log_ration, 0.0)
+    log_ration = jnp.where(b > 0, jnp.log(b / X), 0.0)
+    dtau_alpha = jnp.where(b > 0, -K * log_ration, 0.0)
 
-    tangent_out = dtau_tau0 * dTau0 + dtau_E_a * dE_a + dtau_E * dE + dtau_soft_E * dSoft_E + dtau_alpha * dAlpha
+    tangent_out = (
+        dtau_tau0 * dTau0
+        + dtau_E_a * dE_a
+        + dtau_E * dE
+        + dtau_soft_E * dSoft_E
+        + dtau_alpha * dAlpha
+    )
     return tau, tangent_out
+
 
 @dataclass
 class BrunoParams:
@@ -92,7 +100,7 @@ class BrunoCell(NeuronModel):
     def __init__(
         self,
         shape: Sequence[int],
-        params: Optional[BrunoParams] = None,
+        params: BrunoParams | None = None,
         param_scale: float = 1e12,
         variability: float = 0.0,
         spikefn: Callable[[Array], Array] = tanh_surrogate,
@@ -174,7 +182,7 @@ class BrunoCell(NeuronModel):
         state: Sequence[Array],
         isyn: Array,
         *,
-        key: Optional[PRNGKeyArray] = None,
+        key: PRNGKeyArray | None = None,
     ):
         s, v, p = state
 
@@ -202,7 +210,9 @@ class BrunoCell(NeuronModel):
             s, v, p = carry
             E = v * cap_divider - p * depol_divider
 
-            tau = _tau_fn(self.params.tau_0, E_a, E, self.params.soft_E, self.params.alpha)
+            tau = _tau_fn(
+                self.params.tau_0, E_a, E, self.params.soft_E, self.params.alpha
+            )
             I_p_new = (jnp.sign(E) * P_s - p) * A * tau
             dp = I_p_new / A
             p_new = jnp.clip(p + step_dt * self.params.dt * dp, -P_s, P_s)
@@ -230,7 +240,7 @@ class BrunoCell(NeuronModel):
         tau = _tau_fn(self.params.tau_0, E_a, E, self.params.soft_E, self.params.alpha)
         if self.stop_tau_grad:
             tau = jax.lax.stop_gradient(tau)
-        
+
         I_p_new = (jnp.sign(E) * P_s - p) * A * tau
         dp = I_p_new / A
         p_outer = jnp.clip(p + self.params.dt * dp, -P_s, P_s)
@@ -248,7 +258,7 @@ class BrunoCell(NeuronModel):
             spikes_ref = jax.lax.stop_gradient(s)
         else:
             spikes_ref = s
-        
+
         v = (1 - spikes_ref) * v - 1.5 * spikes_ref
         p = (1 - spikes_ref) * p - (spikes_ref * P_s)
         s = self.spikefn(v - self.params.threshold)
@@ -260,11 +270,11 @@ class BrunoCell(NeuronModel):
 
 
 class CheckpointCell(BrunoCell):
-    checkpoints: Optional[int] = eqx.field(static=True)
+    checkpoints: int | None = eqx.field(static=True)
 
     def __init__(self, *args, **kwargs):
         self.checkpoints = kwargs.pop("checkpoints", None)
-        super(CheckpointCell, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def __call__(
         self, state: Sequence[Array], isyn: Array, *, key: PRNGKeyArray | None = None
@@ -295,7 +305,9 @@ class CheckpointCell(BrunoCell):
             s, v, p = carry
             E = v * cap_divider - p * depol_divider
 
-            tau = _tau_fn(self.params.tau_0, E_a, E, self.params.soft_E, self.params.alpha)
+            tau = _tau_fn(
+                self.params.tau_0, E_a, E, self.params.soft_E, self.params.alpha
+            )
             if self.stop_tau_grad:
                 tau = jax.lax.stop_gradient(tau)
 

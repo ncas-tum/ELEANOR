@@ -1,5 +1,5 @@
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Callable, Optional, Sequence
 
 import equinox as eqx
 import jax
@@ -42,7 +42,7 @@ class FeLIFCell(NeuronModel):
     def __init__(
         self,
         shape: Sequence[int],
-        params: Optional[FeLIFParams] = None,
+        params: FeLIFParams | None = None,
         variability: float = 0.0,
         spike_fn: Callable[[Array], Array] = tanh_surrogate,
         dtype=None,
@@ -95,7 +95,7 @@ class FeLIFCell(NeuronModel):
         state: Sequence[Array],
         synaptic_input: Array,
         *,
-        key: Optional[PRNGKeyArray] = None,
+        key: PRNGKeyArray | None = None,
     ):
         s, v, p = state
 
