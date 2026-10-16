@@ -73,7 +73,7 @@ jobs:
       - name: Install system tools
         env:
           DEBIAN_FRONTEND: noninteractive
-        run: apt update && apt install -y git patchelf
+        run: sudo apt update && apt install -y git patchelf
 
       - name: Setup uv
         uses: astral-sh/setup-uv@v5
