@@ -69,7 +69,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
- 
+      
+      - name: Install system tools
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: apt update && apt install -y git patchelf
+
       - name: Setup uv
         uses: astral-sh/setup-uv@v5
         with:
@@ -80,16 +85,14 @@ jobs:
           CUDA_VERSION: "cpu"
           PIP_EXTRA_INDEX_URL: https://download.pytorch.org/whl/cpu
         run: uv build --wheel --python ${{ matrix.python }}
-
-      - name: Install auditwheel
-        run: uv pip install auditwheel
  
       - name: Repair wheel
         run: |
-          python -m auditwheel repair dist/*.whl -w dist_repaired/ \
-            --exclude libtorch.so \
-            --exclude libtorch_cpu.so \
-            --exclude libc10.so
+          uv run --no-project --python "${{ matrix.python }}" --with auditwheel \
+            python -m auditwheel repair dist/*.whl -w dist_repaired/ \
+              --exclude libtorch.so \
+              --exclude libtorch_cpu.so \
+              --exclude libc10.so
  
       - uses: actions/upload-artifact@v4
         with:
