@@ -32,13 +32,9 @@ def _(
 ):
     torch._check(synaptic_input.shape == v.shape)
     torch._check(p.shape == v.shape)
-    torch._check(cap_divider.shape == v.shape)
-    torch._check(depol_divider.shape == v.shape)
-    torch._check(P_s.shape == v.shape)
-    torch._check(A.shape == v.shape)
-    torch._check(I_0.shape == v.shape)
-    torch._check(E_a.shape == v.shape)
-    torch._check(C_tot.shape == v.shape)
+    # Per-neuron parameters may broadcast against the state, e.g. (1, N) vs (B, N).
+    for param in (cap_divider, depol_divider, P_s, A, I_0, E_a, C_tot):
+        torch._check(torch.broadcast_shapes(param.shape, v.shape) == v.shape)
 
     torch._check(synaptic_input.dtype == torch.float)
     torch._check(v.dtype == torch.float)

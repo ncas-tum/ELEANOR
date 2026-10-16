@@ -24,17 +24,17 @@ def _(
     synaptic_input: Tensor,
     v: Tensor,
     p: Tensor,
-    A: float,
-    t_fe: float,
+    A: Tensor,
+    t_fe: Tensor,
     eps_fe: float,
     eps_depl: float,
     q_fix_depl: float,
-    n_depl: float,
+    n_depl: Tensor,
     e_off: float,
     temp: float,
     w_b: float,
     d_e: float,
-    P_s: float,
+    P_s: Tensor,
     I_0: float,
     V_t: float,
     C_par: float,
@@ -61,28 +61,14 @@ def _(
 
 
 def _backward(ctx, grads):
+    # Heracles.heracles_step only uses the kernel output through .detach() (gradients
+    # flow through the pure-torch single step), so this is never reached in practice.
     grad_v_out, grad_p_out = grads
-    # current, v, p = ctx.saved_tensors
-
     return (
         torch.zeros_like(grad_v_out),
         torch.zeros_like(grad_v_out),
         torch.zeros_like(grad_p_out),
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-    )
+    ) + (None,) * 24
 
 
 def _setup_context(ctx, inputs, output):
@@ -379,17 +365,17 @@ class Heracles(SpikingNeuron):
             input_,
             v,
             p,
-            A.repeat(input_.shape[0], 1),
-            t_fe.repeat(input_.shape[0], 1),
+            A,
+            t_fe,
             self.eps_fe,
             self.eps_depl,
             self.q_fix_depl,
-            n_depl.repeat(input_.shape[0], 1),
+            n_depl,
             self.e_off,
             self.temp,
             self.w_b,
             self.d_e,
-            P_s.repeat(input_.shape[0], 1),
+            P_s,
             self.I_0,
             self.V_t,
             self.C_par,
