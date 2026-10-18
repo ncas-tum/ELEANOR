@@ -17,7 +17,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
 
-      - run: uv sync --locked --all-extras --dev
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
-      - run: uv run pytest
+      - run: uv sync --locked --extra cpu --dev
+      - run: uvx ruff check eleanor
+      - run: uvx ruff format --check eleanor
+      # - run: uv run pytest

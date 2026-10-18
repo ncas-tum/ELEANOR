@@ -30,10 +30,10 @@ jobs:
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
 
       - name: Install the project
-        run: uv sync --dev
+        run: uv sync --dev --extra cpu
 
       - name: Sphinx build
-        run: uv run sphinx-build -b html docs/source docs/_build
+        run: uv run --extra cpu sphinx-build -b html docs/source docs/_build
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

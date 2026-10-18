@@ -83,6 +83,14 @@ dev = [
 ]
 
 [tool.uv]
+# The version comes from git (setuptools-scm) and the package compiles C++,
+# so rebuild on new commits/tags and on source changes, not only pyproject edits
+cache-keys = [
+  { file = "pyproject.toml" },
+  { file = "CMakeLists.txt" },
+  { file = "eleanor/torch/models/csrc/**/*" },
+  { git = { commit = true, tags = true } },
+]
 conflicts = [
   [
     { extra = "cpu" },
@@ -103,6 +111,14 @@ torchvision = [
   { index = "pytorch-cu126", extra = "cuda12" },
   { index = "pytorch-cu130", extra = "cuda13" },
 ]
+
+# Build eleanor against the same torch that is installed for the selected extra
+# (e.g. 2.x+cpu for --extra cpu) instead of the default PyPI (CUDA) wheel.
+# torch is deliberately NOT in build-system.requires: uv resolves
+# scikit-build-core's dynamic build requirements (ninja/cmake) in a second
+# environment where that entry would be unpinned and pull the PyPI wheel.
+[tool.uv.extra-build-dependencies]
+eleanor = [{ requirement = "torch", match-runtime = true }]
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
@@ -126,7 +142,7 @@ cmake.version = "CMakeLists.txt"
 build-dir = "build/{wheel_tag}"
 
 [build-system]
-requires = ["scikit-build-core", "setuptools-scm", "torch"]
+requires = ["scikit-build-core", "setuptools-scm"]
 build-backend = "scikit_build_core.build"
 
 [[tool.dynamic-metadata]]

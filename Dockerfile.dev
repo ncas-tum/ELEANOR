@@ -8,7 +8,7 @@ ENV PATH="/opt/rh/gcc-toolset-12/root/usr/bin:${PATH}" \
     CXX=g++ \
     CUDAHOSTCXX=g++
 
-COPY --from=ghcr.io/astral-sh/uv:0.9 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.12.3 /uv /uvx /bin/
 
 # The source is bind-mounted at runtime and owned by your host user;
 # without this, git (and therefore setuptools-scm) refuses to read it

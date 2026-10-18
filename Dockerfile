@@ -7,7 +7,7 @@ ENV PATH="/opt/rh/gcc-toolset-12/root/usr/bin:${PATH}" \
     CXX=g++ \
     CUDAHOSTCXX=g++
 
-COPY --from=ghcr.io/astral-sh/uv:0.9 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.12.3 /uv /uvx /bin/
 
 WORKDIR /workspace
 
@@ -40,11 +40,13 @@ ENV SETUPTOOLS_SCM_PRETEND_VERSION_FOR_ELEANOR=${ELEANOR_VERSION} \
     VIRTUAL_ENV=/workspace/.venv \
     PATH="/workspace/.venv/bin:${PATH}"
 
+# --no-config: skip [tool.uv]; its extra-build-dependencies (match-runtime)
+# can't be used by `uv build`, and --no-build-isolation uses the venv's torch
 RUN --mount=type=cache,target=/root/.cache/uv \
     test -n "${ELEANOR_VERSION}" || { echo "ERROR: pass --build-arg ELEANOR_VERSION=..."; exit 1; } && \
     uv pip install --python /workspace/.venv/bin/python \
       scikit-build-core setuptools-scm cmake ninja && \
-    uv build --wheel --no-build-isolation \
+    uv build --wheel --no-build-isolation --no-config \
       --python /workspace/.venv/bin/python \
       --out-dir /dist_raw
 
