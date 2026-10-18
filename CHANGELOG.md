@@ -7,7 +7,45 @@ and entries are grouped chronologically by quarter.
 
 ## [Unreleased]
 
+### 2026 Q4
+- Migrated the build backend from `setup.py` to `scikit-build-core` with a
+  `CMakeLists.txt`; the PyTorch C++/CUDA extension is now built as
+  `_C_cpu` or `_C_cu<version>` depending on whether a CUDA compiler is found.
+- Version is now derived from git tags via `setuptools-scm` (written to
+  `eleanor/_version.py`).
+- Added mutually exclusive `cpu`, `cuda12`, `cuda13`, and `mps` extras; each
+  pulls `torch`/`torchvision` from the matching PyTorch index and the matching
+  `jax` variant.
+- `uv sync --extra <name>` now compiles the extension against the torch of
+  the selected extra instead of the default PyPI (CUDA) wheel; `torch` was
+  removed from `build-system.requires`. uv commands that sync the
+  environment (`uv sync`, `uv run`) must now pass `--extra`.
+- uv now rebuilds the package on new commits/tags and on changes to
+  `CMakeLists.txt` or the C++/CUDA sources.
+- Refactored the C++/CUDA implementations of Bruno and Heracles: shared code
+  moved to `common.h` and per-model headers (`bruno.h`, `heracles.h`).
+- Added a `Dockerfile` that builds manylinux wheels per CPU/CUDA variant
+  (with a CUDA architecture check and `auditwheel repair` that keeps torch and
+  CUDA libraries external), and a `Dockerfile.dev` + devcontainer for
+  development.
+- CI: the wheels workflow builds every Python/CUDA variant and attaches the
+  wheels to a GitHub release on `v*` tags; lint and docs workflows install the
+  `cpu` extra.
+
+### 2026 Q3
+- Bruno (JAX): stopping the gradient through `tau` and through the reset is
+  now configurable with `stop_tau_grad` and `stop_reset_grad` (both default to
+  `True`).
+- `eleanor.torch.models` now loads the compiled extension that matches the
+  environment (CPU or CUDA build).
+- Braille dataset is now stored under `/tmp/data/braille` by default.
+
 ### 2026 Q2
+- Bruno (JAX): gradient through `tau` stopped; added an overflow-safe
+  exponential (`limexp`) and a second-derivative `tau` gradient.
+- Braille benchmark.
+- `eleanor.jax.surrogate` is now a public module (was `_surrogate`).
+- Documentation is built and published to GitHub Pages.
 - Migrated build configuration to `uv` via `pyproject.toml`; dev dependencies
   moved to a `[dependency-groups]` table; added `tox.ini` and `.python-version`;
   bumped minimum Python to 3.11.
