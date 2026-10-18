@@ -5,6 +5,8 @@ on:
     branches:
       - main
   workflow_dispatch:
+  # Called by wheels.yml after a release, so the package index includes it
+  workflow_call:
 
 permissions:
   contents: read
@@ -30,10 +32,24 @@ jobs:
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
 
       - name: Install the project
-        run: uv sync --dev --extra cpu
+        run: uv sync --extra cpu
 
       - name: Sphinx build
         run: uv run --extra cpu sphinx-build -b html docs/source docs/_build
+
+      - name: Package index
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p wheels
+          for tag in $(gh release list --limit 1000 --json tagName --jq '.[].tagName'); do
+            gh release download "$tag" --pattern 'eleanor_ncas-*+*.whl' --dir wheels || true
+          done
+          if ls wheels/*.whl > /dev/null 2>&1; then
+            python3 scripts/build_index.py -o docs/_build/whl wheels/*.whl
+          else
+            echo "No released wheels yet: skipping the package index"
+          fi
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

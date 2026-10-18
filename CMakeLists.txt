@@ -38,8 +38,15 @@ else()
     message(STATUS "Building for CPU. Suffix: cpu")
 endif()
 
-find_package(Torch REQUIRED)
-find_package(Python COMPONENTS Interpreter Development REQUIRED)
+find_package(Torch QUIET)
+if(NOT Torch_FOUND)
+    message(FATAL_ERROR
+        "PyTorch was not found, but ELEANOR's extension is built against it.\n"
+        "Pick a hardware variant when syncing: uv sync --extra cpu "
+        "(or --extra cuda12 / cuda13 / mps).")
+endif()
+# Development.Module only: an extension module must not link libpython
+find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
 find_package(OpenMP REQUIRED)
 
 set(MODULE_NAME "_C_${CUDA_SUFFIX}")
@@ -98,6 +105,12 @@ endif()
 target_compile_options(${MODULE_NAME} PRIVATE 
     $<$<COMPILE_LANGUAGE:CXX>:${CXX_OPT} -fopenmp -fdiagnostics-color=always>
     $<$<COMPILE_LANGUAGE:CUDA>:${NVCC_OPT} -U Py_LIMITED_API>
+)
+
+# Use only the stable Python API (3.11+), so a single cp311-abi3 wheel works on
+# every newer CPython. models.cpp is the only file that includes Python.h.
+target_compile_definitions(${MODULE_NAME} PRIVATE
+    $<$<COMPILE_LANGUAGE:CXX>:Py_LIMITED_API=0x030B0000>
 )
 
 # Define the macro used by models.cpp for the PyInit function

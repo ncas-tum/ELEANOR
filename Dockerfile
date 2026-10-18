@@ -11,7 +11,8 @@ COPY --from=ghcr.io/astral-sh/uv:0.12.3 /uv /uvx /bin/
 
 WORKDIR /workspace
 
-ARG PYTHON_VERSION=3.14
+# The wheel is abi3: the build Python only sets the minimum supported version
+ARG PYTHON_VERSION=3.11
 ARG MAX_JOBS=8
 ARG UV_EXTRA=cuda12
 ARG TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;8.9;9.0"
@@ -30,23 +31,21 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=README.md,target=README.md \
     --mount=type=bind,source=LICENSE.txt,target=LICENSE.txt \
     mkdir -p eleanor && \
-    SETUPTOOLS_SCM_PRETEND_VERSION_FOR_ELEANOR=0.0.0 \
+    SETUPTOOLS_SCM_PRETEND_VERSION_FOR_ELEANOR_NCAS=0.0.0 \
     uv sync --frozen --extra ${UV_EXTRA} --no-install-project
 
 COPY . /workspace
 
 ARG ELEANOR_VERSION
-ENV SETUPTOOLS_SCM_PRETEND_VERSION_FOR_ELEANOR=${ELEANOR_VERSION} \
+ENV SETUPTOOLS_SCM_PRETEND_VERSION_FOR_ELEANOR_NCAS=${ELEANOR_VERSION} \
     VIRTUAL_ENV=/workspace/.venv \
     PATH="/workspace/.venv/bin:${PATH}"
 
-# --no-config: skip [tool.uv]; its extra-build-dependencies (match-runtime)
-# can't be used by `uv build`, and --no-build-isolation uses the venv's torch
 RUN --mount=type=cache,target=/root/.cache/uv \
     test -n "${ELEANOR_VERSION}" || { echo "ERROR: pass --build-arg ELEANOR_VERSION=..."; exit 1; } && \
     uv pip install --python /workspace/.venv/bin/python \
       scikit-build-core setuptools-scm cmake ninja && \
-    uv build --wheel --no-build-isolation --no-config \
+    uv build --wheel --no-build-isolation \
       --python /workspace/.venv/bin/python \
       --out-dir /dist_raw
 
@@ -81,6 +80,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
       --exclude 'libc10*' \
       --exclude 'libgomp*' \
       --exclude 'libcudart.so*' \
+      --exclude 'libnvrtc*' \
       --exclude 'libcuda.so*'
 
 FROM scratch AS export

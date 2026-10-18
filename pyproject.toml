@@ -1,5 +1,5 @@
 [project]
-name = "eleanor"
+name = "eleanor-ncas"
 dynamic = ["version"]
 description = "Python package to simulate FeLIF neurons"
 readme = {file = "README.md", content-type = "text/markdown"}
@@ -65,9 +65,15 @@ mps = [
   "jax>=0.10.0",
   "jax-mps>=0.10.0",
 ]
-notebook = ["ipykernel>=7.4.0", "ipywidgets>=8.1.9", "boilerplot@git+https://github.com/fehlings/boilerplot.git"]
+notebook = [
+  "ipykernel>=7.4.0",
+  "ipywidgets>=8.1.9",
+  "boilerplot@git+https://github.com/fehlings/boilerplot.git"
+]
 
 [dependency-groups]
+# Build tools for eleanor itself, which uv builds inside the project venv
+build = ["scikit-build-core", "setuptools-scm", "cmake", "ninja"]
 dev = [
     "expecttest>=0.3.0",
     "hypothesis>=6.170.0",
@@ -80,6 +86,7 @@ dev = [
     "sphinx-copybutton>=0.5.2",
     "sphinx-thebe>=0.3.1",
     "sphinxcontrib-bibtex>=2.6.5",
+    "tox>=4.67.1",
 ]
 
 [tool.uv]
@@ -91,6 +98,12 @@ cache-keys = [
   { file = "eleanor/torch/models/csrc/**/*" },
   { git = { commit = true, tags = true } },
 ]
+default-groups = ["dev", "build"]
+# Build eleanor in the project venv (no build isolation) so it compiles against
+# the torch installed for the selected extra (e.g. 2.x+cpu for --extra cpu)
+# instead of the default PyPI (CUDA) wheel. uv installs everything else first.
+# torch is deliberately NOT in build-system.requires.
+no-build-isolation-package = ["eleanor-ncas"]
 conflicts = [
   [
     { extra = "cpu" },
@@ -112,14 +125,6 @@ torchvision = [
   { index = "pytorch-cu130", extra = "cuda13" },
 ]
 
-# Build eleanor against the same torch that is installed for the selected extra
-# (e.g. 2.x+cpu for --extra cpu) instead of the default PyPI (CUDA) wheel.
-# torch is deliberately NOT in build-system.requires: uv resolves
-# scikit-build-core's dynamic build requirements (ninja/cmake) in a second
-# environment where that entry would be unpinned and pull the PyPI wheel.
-[tool.uv.extra-build-dependencies]
-eleanor = [{ requirement = "torch", match-runtime = true }]
-
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
@@ -140,6 +145,14 @@ explicit = true
 wheel.expand-macos-universal-tags = true
 cmake.version = "CMakeLists.txt"
 build-dir = "build/{wheel_tag}"
+# The extension only uses the limited Python API (Py_LIMITED_API in
+# CMakeLists.txt): tag the wheel cp311-abi3 so it installs on Python 3.11+
+wheel.py-api = "cp311"
+# The distribution is eleanor-ncas, but the import package stays `eleanor`
+wheel.packages = ["eleanor"]
+# setuptools-scm writes eleanor/_version.py at build time; it is git-ignored,
+# and scikit-build-core leaves git-ignored files out unless listed here
+sdist.include = ["eleanor/_version.py"]
 
 [build-system]
 requires = ["scikit-build-core", "setuptools-scm"]

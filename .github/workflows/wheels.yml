@@ -5,15 +5,25 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+# One cp311-abi3 wheel per hardware variant (0.1.0+cpu, 0.1.0+cu126,
+# 0.1.0+cu130), each pinning the torch build it was compiled against. Users
+# install from the per-variant index on GitHub Pages:
+#
+#   pip install eleanor-ncas --extra-index-url https://ncas-tum.github.io/ELEANOR/whl/cu126
+#
+#   build   -> variant wheel (Docker) with torch/torchvision/jax pinned
+#   smoke   -> serve the index locally, install from it with pip and uv, import
+#   release -> attach the wheels to the GitHub release (tags only)
+#   pages   -> rebuild docs + index from all releases (tags only)
+
 jobs:
   build:
-    name: Build (Python ${{ matrix.python }})
+    name: Build (${{ matrix.variant.name }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.11", "3.12", "3.13", "3.14"]
-        cuda:
+        variant:
           - name: cpu
             image: "almalinux:8"
             extra: cpu
@@ -41,15 +51,12 @@ jobs:
 
       - uses: astral-sh/setup-uv@v6
 
+      # 0.1.0 -> 0.1.0+cu126; untagged 0.1.1.dev3+g1234abc -> 0.1.1.dev3+cu126
       - name: Compute version
         id: version
         run: |
           BASE=$(uvx --from setuptools-scm python -m setuptools_scm)
-          if [[ "$BASE" == *+* ]]; then
-            VERSION="${BASE}.${{ matrix.cuda.name }}"
-          else
-            VERSION="${BASE}+${{ matrix.cuda.name }}"
-          fi
+          VERSION="${BASE%%+*}+${{ matrix.variant.name }}"
           echo "Building version: $VERSION"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
@@ -61,33 +68,89 @@ jobs:
           context: .
           file: Dockerfile
           target: export
+          # The wheel is abi3 (Python 3.11+), so one Python version is enough
           build-args: |
-            BASE_IMAGE=${{ matrix.cuda.image }}
-            UV_EXTRA=${{ matrix.cuda.extra }}
-            TORCH_CUDA_ARCH_LIST=${{ matrix.cuda.archs }}
-            PYTHON_VERSION=${{ matrix.python }}
+            BASE_IMAGE=${{ matrix.variant.image }}
+            UV_EXTRA=${{ matrix.variant.extra }}
+            TORCH_CUDA_ARCH_LIST=${{ matrix.variant.archs }}
+            PYTHON_VERSION=3.11
             ELEANOR_VERSION=${{ steps.version.outputs.version }}
             MAX_JOBS=4
-          outputs: type=local,dest=dist
+          outputs: type=local,dest=raw
 
-      - name: Check wheel contents
+      - name: Pin torch, torchvision and jax for this variant
+        run: |
+          PINS=$(uv export --frozen --extra ${{ matrix.variant.extra }} \
+                   --no-hashes --no-emit-project \
+                 | grep -E "^(torch|torchvision)==[^ ]*\+${{ matrix.variant.name }}( |$)" \
+                 | cut -d' ' -f1 | sed 's/^/--pin /')
+          python3 scripts/make_variant_wheel.py raw/*.whl \
+            --variant ${{ matrix.variant.name }} --extra ${{ matrix.variant.extra }} $PINS -o dist
+
+      - name: Check wheel
         run: |
           ls -lh dist/
           unzip -l dist/*.whl
-          if unzip -l dist/*.whl | grep -E 'eleanor\.libs/(libtorch|libc10|libcudart|libcuda|libgomp)'; then
+          unzip -p dist/*.whl '*.dist-info/METADATA' | grep -E '^(Version|Requires-Dist):'
+          if unzip -l dist/*.whl | grep -E 'eleanor(_ncas)?\.libs/(libtorch|libc10|libcudart|libcuda|libgomp|libnvrtc)'; then
             echo "ERROR: torch/CUDA libraries were bundled into the wheel"
             exit 1
           fi
+          uvx abi3audit --strict --verbose dist/*.whl
 
       - uses: actions/upload-artifact@v4
         with:
-          name: wheel-${{ matrix.cuda.name }}-py${{ matrix.python }}
+          name: wheel-${{ matrix.variant.name }}
           path: dist/*.whl
           if-no-files-found: error
 
+  # No GPU on the runners: this checks that each variant installs the right
+  # torch/jax builds and that its extension loads, not that the kernels run.
+  smoke:
+    name: Smoke (py${{ matrix.python }}, ${{ matrix.variant }})
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.14"]
+        variant: [cpu, cu126, cu130]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel-${{ matrix.variant }}
+          path: wheels
+
+      - name: Serve the index locally
+        run: |
+          python3 scripts/build_index.py -o index wheels/*.whl
+          python3 -m http.server 8000 --directory index > /dev/null 2>&1 &
+          sleep 2
+          curl -sf http://localhost:8000/${{ matrix.variant }}/eleanor-ncas/ > /dev/null
+
+      - name: pip install eleanor-ncas --extra-index-url ...
+        run: |
+          uv venv --seed --python ${{ matrix.python }} pip-env
+          pip-env/bin/python -m pip install --disable-pip-version-check -q eleanor-ncas \
+            --extra-index-url http://localhost:8000/${{ matrix.variant }}
+          pip-env/bin/python scripts/check_install.py ${{ matrix.variant }}
+
+      - name: uv add eleanor-ncas --index ...
+        env:
+          UV_HTTP_TIMEOUT: "300"   # pypi.nvidia.com can be slow
+        run: |
+          uv init -q --bare --python ${{ matrix.python }} uv-project
+          cd uv-project
+          uv add -q eleanor-ncas --index http://localhost:8000/${{ matrix.variant }}
+          uv run python ../scripts/check_install.py ${{ matrix.variant }}
+
   release:
     name: Publish GitHub release
-    needs: build
+    needs: smoke
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
@@ -102,3 +165,14 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*.whl
+          prerelease: ${{ contains(github.ref_name, 'rc') || contains(github.ref_name, 'a') || contains(github.ref_name, 'b') }}
+
+  # Rebuild docs + package index so the new release is installable
+  pages:
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/')
+    uses: ./.github/workflows/pages.yml
+    permissions:
+      contents: read   # gh release download
+      pages: write
+      id-token: write

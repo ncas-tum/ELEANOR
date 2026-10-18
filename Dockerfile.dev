@@ -35,13 +35,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=README.md,target=README.md \
     --mount=type=bind,source=LICENSE.txt,target=LICENSE.txt \
     mkdir -p eleanor && \
-    SETUPTOOLS_SCM_PRETEND_VERSION_FOR_ELEANOR=0.0.0 \
+    SETUPTOOLS_SCM_PRETEND_VERSION_FOR_ELEANOR_NCAS=0.0.0 \
     uv sync --frozen --extra ${UV_EXTRA} --no-install-project && \
     uv pip install scikit-build-core setuptools-scm cmake ninja && \
     rm -rf eleanor
 
 # Helper: editable install of eleanor, built against the venv's torch
-RUN printf '#!/bin/sh\nexec uv sync --inexact --extra "$ELEANOR_EXTRA" --no-build-isolation-package eleanor "$@"\n' \
+RUN printf '#!/bin/sh\nexec uv sync --inexact --extra "$ELEANOR_EXTRA" --no-build-isolation-package eleanor-ncas "$@"\n' \
       > /usr/local/bin/dev-sync && chmod +x /usr/local/bin/dev-sync
 
 CMD ["bash"]
