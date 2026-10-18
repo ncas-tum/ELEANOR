@@ -7,6 +7,8 @@ and entries are grouped chronologically by quarter.
 
 ## [Unreleased]
 
+## [0.1.0a1] - 2026-10-18
+
 ### 2026 Q4
 - Migrated the build backend from `setup.py` to `scikit-build-core` with a
   `CMakeLists.txt`; the PyTorch C++/CUDA extension is now built as
@@ -51,6 +53,20 @@ and entries are grouped chronologically by quarter.
   each wheel from a locally served index with pip and uv on Python 3.11 and
   3.14, and on `v*` tags attaches the wheels to a GitHub release and rebuilds
   the docs + index. Lint and docs workflows install the `cpu` extra.
+- macOS (Apple Silicon, macOS 14+) wheels: a `+cpu` wheel in the `cpu` index,
+  next to the Linux one, and a new `+mps` variant
+  (`https://ncas-tum.github.io/ELEANOR/whl/mps`) that also installs `jax-mps`.
+  The Linux and macOS `cpu` wheels share their metadata: each pins
+  `torch==<v>+cpu` on Linux and the plain `torch==<v>` on macOS, and the `cpu`
+  index links both builds. CI builds them natively on `macos-14` and
+  smoke-tests them like the Linux wheels; locally,
+  `MACOS_VARIANTS="cpu mps" scripts/build.sh` builds them on a Mac.
+- Fixed: building on macOS failed because Apple Clang has no OpenMP. The
+  extension now uses the `omp.h` and `libomp` that ship with PyTorch (a second
+  OpenMP runtime would conflict with torch's), and links `Python::Module` so
+  Python symbols resolve at load time instead of failing to link.
+- `scripts/make_variant_wheel.py` takes the pins as a `uv export` file
+  (`--pins`) instead of `--pin` options, keeping their platform markers.
 
 ### 2026 Q3
 - Bruno (JAX): stopping the gradient through `tau` and through the reset is
@@ -154,5 +170,6 @@ and entries are grouped chronologically by quarter.
 ### 2024 Q1
 - Initial commit; FeLIF neuron in JAX; Braille training example.
 
-[Unreleased]: https://github.com/ncas-tum/ELEANOR/compare/v0.0.dev0...HEAD
+[Unreleased]: https://github.com/ncas-tum/ELEANOR/compare/v0.1.0a1...HEAD
+[v0.1.0a1]: https://github.com/ncas-tum/ELEANOR/releases/tag/v0.1.0a1
 [v0.0.dev0]: https://github.com/ncas-tum/ELEANOR/releases/tag/v0.0.dev0
