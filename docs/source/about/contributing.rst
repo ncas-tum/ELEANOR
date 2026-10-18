@@ -22,8 +22,10 @@ Development setup
 
     git clone https://github.com/ncas-tum/ELEANOR.git
     cd ELEANOR
-    uv sync --group dev
-    pre-commit install
+    uv sync --extra cpu        # or cuda12 / cuda13 / mps; includes dev tools
+    uv run pre-commit install
+
+See :ref:`installation` for the build requirements and the GPU variants.
 
 Style and checks
 ----------------

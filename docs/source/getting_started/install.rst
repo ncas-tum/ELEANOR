@@ -6,51 +6,105 @@ Installation
 Requirements
 ------------
 
-- Python ≥ 3.11
-- One of the supported backends:
+- Python 3.11–3.14
+- Linux or macOS. Windows is not officially supported, but ELEANOR may work
+  via WSL2.
 
-  - **JAX** ≥ 0.10.1 (CPU, CUDA, or ROCm)
-  - **PyTorch** ≥ 2.0 (CPU or CUDA)
+ELEANOR ships with both a JAX and a PyTorch backend, and is installed as
+``eleanor-ncas`` (the import name stays ``eleanor``). You choose **one**
+hardware variant at install time, and it selects the matching PyTorch and JAX
+builds. The variants are mutually exclusive: an environment can only hold one
+of them.
 
-ELEANOR is tested on Linux and macOS. Windows is not officially supported but
-the JAX backend may work via WSL2.
+Prebuilt wheels
+---------------
 
-Install from GitHub
--------------------
+Prebuilt wheels are available for Linux (x86_64). Each variant has its own
+package index; add it next to PyPI, and pip or uv installs ELEANOR with the
+matching PyTorch and JAX:
 
-ELEANOR is not yet on PyPI. We recommend using `uv`_ for fast and
-reproducible environments. Install the latest version directly from GitHub:
+.. list-table::
+   :header-rows: 1
+
+   * - Variant
+     - Hardware
+     - Index
+   * - ``cpu``
+     - CPU only
+     - ``https://ncas-tum.github.io/ELEANOR/whl/cpu``
+   * - ``cu126``
+     - NVIDIA GPU, CUDA 12.6
+     - ``https://ncas-tum.github.io/ELEANOR/whl/cu126``
+   * - ``cu130``
+     - NVIDIA GPU, CUDA 13.0
+     - ``https://ncas-tum.github.io/ELEANOR/whl/cu130``
+
+With pip:
 
 .. code-block:: bash
 
-    uv add git+https://github.com/ncas-tum/ELEANOR.git
+    pip install eleanor-ncas --extra-index-url https://ncas-tum.github.io/ELEANOR/whl/cpu
 
-For GPU support with JAX:
+In a uv project:
 
 .. code-block:: bash
 
-    uv add "eleanor[gpu] @ git+https://github.com/ncas-tum/ELEANOR.git"
+    uv add eleanor-ncas --index https://ncas-tum.github.io/ELEANOR/whl/cpu
 
-Development install
+Use ``--extra-index-url`` (pip) or ``--index`` (uv), not ``--index-url``: the
+index only holds ELEANOR and PyTorch, and everything else comes from PyPI.
+
+.. note::
+
+   On Python 3.12 and newer, one dependency (``expelliarmus``, required by
+   ``tonic``) has no prebuilt wheel and is compiled during installation, so a
+   C compiler such as ``gcc`` is needed.
+
+The wheels are also attached to every
+`GitHub release <https://github.com/ncas-tum/ELEANOR/releases>`_.
+
+Install from source
 -------------------
 
-Clone and install in editable mode.
+Installing from source compiles the PyTorch C++/CUDA extension. The variant is
+selected with an extra: ``cpu``, ``cuda12``, ``cuda13`` or ``mps``. You need:
+
+- a C++20 compiler with OpenMP support;
+- ``nvcc`` matching the CUDA version, for the ``cuda12`` and ``cuda13``
+  variants;
+- `uv`_, which installs the right PyTorch build for the chosen variant and
+  compiles the extension against it.
 
 .. code-block:: bash
 
     git clone https://github.com/ncas-tum/ELEANOR.git
     cd ELEANOR
-    uv sync                       # production deps
-    uv sync --group dev           # add development tools
+    uv sync --extra cpu        # or cuda12 / cuda13 / mps
+
+This creates ``.venv`` with ELEANOR installed in editable mode, together with
+the development tools.
+
+Once synced, ``uv run pytest`` and other ``uv run`` commands keep the PyTorch
+of the selected extra. Always pass the extra to ``uv sync``: a plain
+``uv sync`` removes PyTorch.
+
+.. note::
+
+   ELEANOR's version comes from git tags, so uv builds the package inside the
+   project environment. If a uv command fails with a message asking you to
+   install ``scikit_build_core``, run
+   ``uv pip install scikit-build-core setuptools-scm cmake ninja`` once and
+   retry. This is only needed for environments created with an older ELEANOR
+   checkout.
 
 .. _uv: https://docs.astral.sh/uv/
 
-With plain pip:
+Development container
+---------------------
 
-.. code-block:: bash
-
-    git clone https://github.com/ncas-tum/ELEANOR.git
-    pip install -e ELEANOR
+The repository includes a ``Dockerfile.dev`` and a ``.devcontainer/``
+configuration with the full toolchain (compiler, CUDA, uv) already installed.
+Inside the container, run ``dev-sync`` for an editable install.
 
 Verify the install
 ------------------

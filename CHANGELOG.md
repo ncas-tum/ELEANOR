@@ -18,19 +18,39 @@ and entries are grouped chronologically by quarter.
   `jax` variant.
 - `uv sync --extra <name>` now compiles the extension against the torch of
   the selected extra instead of the default PyPI (CUDA) wheel; `torch` was
-  removed from `build-system.requires`. uv commands that sync the
-  environment (`uv sync`, `uv run`) must now pass `--extra`.
+  removed from `build-system.requires`.
+- Development: the hardware variant is always chosen explicitly with
+  `uv sync --extra cpu` (or `cuda12` / `cuda13` / `mps`); a sync without one
+  fails with a message saying so.
 - uv now rebuilds the package on new commits/tags and on changes to
   `CMakeLists.txt` or the C++/CUDA sources.
 - Refactored the C++/CUDA implementations of Bruno and Heracles: shared code
   moved to `common.h` and per-model headers (`bruno.h`, `heracles.h`).
-- Added a `Dockerfile` that builds manylinux wheels per CPU/CUDA variant
-  (with a CUDA architecture check and `auditwheel repair` that keeps torch and
-  CUDA libraries external), and a `Dockerfile.dev` + devcontainer for
-  development.
-- CI: the wheels workflow builds every Python/CUDA variant and attaches the
-  wheels to a GitHub release on `v*` tags; lint and docs workflows install the
-  `cpu` extra.
+- Renamed the distribution to `eleanor-ncas` (`eleanor` is taken on PyPI); the
+  import name is still `eleanor`.
+- Release wheels: one `cp311-abi3` manylinux wheel per hardware variant
+  (`+cpu`, `+cu126`, `+cu130`) that works on Python 3.11+. The extension now
+  uses only the limited Python API, and each wheel pins the exact
+  `torch`/`torchvision` build it was compiled against plus the matching `jax`.
+- Per-variant package index on GitHub Pages
+  (`https://ncas-tum.github.io/ELEANOR/whl/<variant>`):
+  `pip install eleanor-ncas --extra-index-url .../whl/cpu` or
+  `uv add eleanor-ncas --index .../whl/cpu` installs ELEANOR with the matching
+  PyTorch and JAX.
+- `eleanor.torch.models` picks the extension that matches the installed
+  torch, falling back to another build of the same CUDA major version, and
+  lists the available builds when none match.
+- Fixed: installed wheels reported version `0.0.dev0`, because the generated
+  `eleanor/_version.py` was left out of the wheel.
+- Added a `Dockerfile` that builds each variant (with a CUDA architecture check
+  and `auditwheel repair` that keeps torch and CUDA libraries, including
+  NVRTC, external), scripts to turn the builds into variant wheels and an
+  index (`scripts/make_variant_wheel.py`, `scripts/build_index.py`), and a
+  `Dockerfile.dev` + devcontainer for development.
+- CI: the wheels workflow builds every variant, checks the stable ABI, installs
+  each wheel from a locally served index with pip and uv on Python 3.11 and
+  3.14, and on `v*` tags attaches the wheels to a GitHub release and rebuilds
+  the docs + index. Lint and docs workflows install the `cpu` extra.
 
 ### 2026 Q3
 - Bruno (JAX): stopping the gradient through `tau` and through the reset is
