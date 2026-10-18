@@ -5,14 +5,16 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
-# One cp311-abi3 wheel per hardware variant (0.1.0+cpu, 0.1.0+cu126,
-# 0.1.0+cu130), each pinning the torch build it was compiled against. Users
-# install from the per-variant index on GitHub Pages:
+# cp311-abi3 wheels per hardware variant, each pinning the torch build it was
+# compiled against: 0.1.0+cpu (Linux x86_64 and macOS arm64), 0.1.0+cu126 and
+# 0.1.0+cu130 (Linux x86_64), 0.1.0+mps (macOS arm64). Users install from the
+# per-variant index on GitHub Pages:
 #
 #   pip install eleanor-ncas --extra-index-url https://ncas-tum.github.io/ELEANOR/whl/cu126
 #
-#   build   -> variant wheel (Docker) with torch/torchvision/jax pinned
-#   smoke   -> serve the index locally, install from it with pip and uv, import
+#   build       -> Linux variant wheel (Docker) with torch/torchvision/jax pinned
+#   build-macos -> the same for macOS cpu/mps (native: Docker can't build them)
+#   smoke       -> serve the index locally, install from it with pip and uv, import
 #   release -> attach the wheels to the GitHub release (tags only)
 #   pages   -> rebuild docs + index from all releases (tags only)
 
@@ -78,14 +80,14 @@ jobs:
             MAX_JOBS=4
           outputs: type=local,dest=raw
 
+      # Pins keep uv's markers, so the Linux and macOS cpu wheels match
       - name: Pin torch, torchvision and jax for this variant
         run: |
-          PINS=$(uv export --frozen --extra ${{ matrix.variant.extra }} \
-                   --no-hashes --no-emit-project \
-                 | grep -E "^(torch|torchvision)==[^ ]*\+${{ matrix.variant.name }}( |$)" \
-                 | cut -d' ' -f1 | sed 's/^/--pin /')
+          uv export --frozen --extra ${{ matrix.variant.extra }} \
+            --no-hashes --no-emit-project > pins.txt
           python3 scripts/make_variant_wheel.py raw/*.whl \
-            --variant ${{ matrix.variant.name }} --extra ${{ matrix.variant.extra }} $PINS -o dist
+            --variant ${{ matrix.variant.name }} --extra ${{ matrix.variant.extra }} \
+            --pins pins.txt -o dist
 
       - name: Check wheel
         run: |
@@ -100,30 +102,102 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: wheel-${{ matrix.variant.name }}
+          name: wheel-${{ matrix.variant.name }}-linux
+          path: dist/*.whl
+          if-no-files-found: error
+
+  # Apple Silicon: torch's macOS builds have no local version (plain 2.x.y)
+  # and ship their own libomp, which the extension links against (CMakeLists.txt)
+  build-macos:
+    name: Build (macOS ${{ matrix.variant.name }})
+    runs-on: macos-14   # arm64
+    strategy:
+      fail-fast: false
+      matrix:
+        variant:
+          - name: cpu
+            extra: cpu
+          - name: mps
+            extra: mps
+    env:
+      # Match the macOS minimum of torch's own arm64 wheels
+      MACOSX_DEPLOYMENT_TARGET: "14.0"
+      UV_PYTHON: "3.11"   # abi3: the build Python only sets the minimum
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history + tags, needed by setuptools-scm
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Compute version
+        id: version
+        run: |
+          BASE=$(uvx --from setuptools-scm python -m setuptools_scm)
+          VERSION="${BASE%%+*}+${{ matrix.variant.name }}"
+          echo "Building version: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build wheel
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_ELEANOR_NCAS: ${{ steps.version.outputs.version }}
+        run: |
+          uv sync --frozen --extra ${{ matrix.variant.extra }} \
+            --no-default-groups --group build --no-install-project
+          uv build --wheel --no-build-isolation --python .venv/bin/python --out-dir raw
+
+      - name: Pin torch, torchvision and jax for this variant
+        run: |
+          uv export --frozen --extra ${{ matrix.variant.extra }} \
+            --no-hashes --no-emit-project > pins.txt
+          python3 scripts/make_variant_wheel.py raw/*.whl \
+            --variant ${{ matrix.variant.name }} --extra ${{ matrix.variant.extra }} \
+            --pins pins.txt -o dist
+
+      - name: Check wheel
+        run: |
+          ls -lh dist/
+          unzip -l dist/*.whl
+          unzip -p dist/*.whl '*.dist-info/METADATA' | grep -E '^(Version|Requires-Dist):'
+          if unzip -l dist/*.whl | grep -E '\.dylib'; then
+            echo "ERROR: dynamic libraries were bundled into the wheel"
+            exit 1
+          fi
+          uvx abi3audit --strict --verbose dist/*.whl
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.variant.name }}-macos
           path: dist/*.whl
           if-no-files-found: error
 
   # No GPU on the runners: this checks that each variant installs the right
   # torch/jax builds and that its extension loads, not that the kernels run.
   smoke:
-    name: Smoke (py${{ matrix.python }}, ${{ matrix.variant }})
-    needs: build
-    runs-on: ubuntu-latest
+    name: Smoke (${{ matrix.os }}, py${{ matrix.python }}, ${{ matrix.variant }})
+    needs: [build, build-macos]
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         python: ["3.11", "3.14"]
-        variant: [cpu, cu126, cu130]
+        variant: [cpu, cu126, cu130, mps]
+        os: [ubuntu-latest, macos-14]
+        exclude:
+          - { variant: cu126, os: macos-14 }
+          - { variant: cu130, os: macos-14 }
+          - { variant: mps, os: ubuntu-latest }
     steps:
       - uses: actions/checkout@v4
 
       - uses: astral-sh/setup-uv@v6
 
+      # Every platform's wheels of the variant, as on the real index
       - uses: actions/download-artifact@v4
         with:
-          name: wheel-${{ matrix.variant }}
+          pattern: wheel-${{ matrix.variant }}-*
           path: wheels
+          merge-multiple: true
 
       - name: Serve the index locally
         run: |

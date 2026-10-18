@@ -47,6 +47,15 @@ if(NOT Torch_FOUND)
 endif()
 # Development.Module only: an extension module must not link libpython
 find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
+
+# Apple Clang has no OpenMP of its own. PyTorch's macOS wheels ship omp.h and
+# libomp.dylib, so use those: linking a second runtime (e.g. Homebrew's) next
+# to torch's makes libomp abort with "OMP: Error #15" at import time.
+if(APPLE AND NOT OpenMP_CXX_FLAGS AND EXISTS "${TORCH_INSTALL_PREFIX}/lib/libomp.dylib")
+    set(OpenMP_CXX_FLAGS "-Xclang -fopenmp -I${TORCH_INSTALL_PREFIX}/include")
+    set(OpenMP_CXX_LIB_NAMES "omp")
+    set(OpenMP_omp_LIBRARY "${TORCH_INSTALL_PREFIX}/lib/libomp.dylib")
+endif()
 find_package(OpenMP REQUIRED)
 
 set(MODULE_NAME "_C_${CUDA_SUFFIX}")
@@ -103,7 +112,7 @@ endif()
 
 # C++ Flags
 target_compile_options(${MODULE_NAME} PRIVATE 
-    $<$<COMPILE_LANGUAGE:CXX>:${CXX_OPT} -fopenmp -fdiagnostics-color=always>
+    $<$<COMPILE_LANGUAGE:CXX>:${CXX_OPT} -fdiagnostics-color=always>
     $<$<COMPILE_LANGUAGE:CUDA>:${NVCC_OPT} -U Py_LIMITED_API>
 )
 
@@ -118,9 +127,8 @@ target_compile_definitions(${MODULE_NAME} PRIVATE
 target_compile_definitions(${MODULE_NAME} PRIVATE TORCH_EXTENSION_NAME=${MODULE_NAME})
 
 target_link_options(${MODULE_NAME} PRIVATE ${LINK_OPT})
-
-# Link PyTorch and OpenMP
 target_link_libraries(${MODULE_NAME} PRIVATE
+    Python::Module
     ${TORCH_LIBRARIES}
     OpenMP::OpenMP_CXX
 )

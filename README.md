@@ -21,16 +21,19 @@ ELEANOR needs Python 3.11–3.14 and is installed as `eleanor-ncas` (the import
 name stays `eleanor`). Pick **one** hardware variant; it selects the matching
 PyTorch and JAX builds.
 
-### Prebuilt wheels (Linux x86_64)
+### Prebuilt wheels (Linux x86_64, macOS arm64)
 
 Each variant has its own package index. Add it next to PyPI, and pip or uv
 installs ELEANOR with the matching PyTorch and JAX:
 
-| Variant | Hardware              | Index                                         |
-|---------|-----------------------|-----------------------------------------------|
-| `cpu`   | CPU only              | `https://ncas-tum.github.io/ELEANOR/whl/cpu`   |
-| `cu126` | NVIDIA GPU, CUDA 12.6 | `https://ncas-tum.github.io/ELEANOR/whl/cu126` |
-| `cu130` | NVIDIA GPU, CUDA 13.0 | `https://ncas-tum.github.io/ELEANOR/whl/cu130` |
+| Variant | Hardware                         | Index                                          |
+|---------|----------------------------------|------------------------------------------------|
+| `cpu`   | CPU only (Linux and macOS)       | `https://ncas-tum.github.io/ELEANOR/whl/cpu`   |
+| `cu126` | NVIDIA GPU, CUDA 12.6 (Linux)    | `https://ncas-tum.github.io/ELEANOR/whl/cu126` |
+| `cu130` | NVIDIA GPU, CUDA 13.0 (Linux)    | `https://ncas-tum.github.io/ELEANOR/whl/cu130` |
+| `mps`   | Apple Silicon, with JAX on Metal | `https://ncas-tum.github.io/ELEANOR/whl/mps`   |
+
+The macOS wheels need Apple Silicon and macOS 14 or newer.
 
 ```bash
 pip install eleanor-ncas --extra-index-url https://ncas-tum.github.io/ELEANOR/whl/cpu

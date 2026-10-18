@@ -7,12 +7,16 @@ the variant extras (cpu, cuda12, cuda13, mps) optional. This script:
   torch, torchvision and jax[cuda12]), so a plain `pip install eleanor-ncas`
   from the variant index pulls the right builds;
 - pins torch/torchvision to the exact builds the extension was compiled
-  against (e.g. torch==2.14.1+cu126), since the extension only works with them;
+  against (e.g. torch==2.14.1+cu126), since the extension only works with them.
+  The pins come from `uv export` and keep its markers: the cpu variant pins
+  torch==2.14.1+cpu on Linux and torch==2.14.1 on macOS, so its Linux and
+  macOS wheels have identical metadata, as installers expect;
 - drops all variant extras, which are meaningless in a variant wheel.
 
 Usage:
+    uv export --frozen --extra cuda12 --no-hashes --no-emit-project > pins.txt
     python scripts/make_variant_wheel.py dist/raw.whl --variant cu126 --extra cuda12 \
-        --pin torch==2.14.1+cu126 --pin torchvision==0.29.1+cu126 -o dist/variants
+        --pins pins.txt -o dist/variants
 """
 
 import argparse
@@ -28,6 +32,7 @@ EXTRA_REQ = re.compile(
     r"^Requires-Dist:\s*(.+?)\s*;\s*extra\s*==\s*[\"']([^\"']+)[\"']\s*$"
 )
 PROVIDES = re.compile(r"^Provides-Extra:\s*(\S+)\s*$")
+PINNED = ("torch", "torchvision")
 
 
 def req_name(requirement):
@@ -36,8 +41,23 @@ def req_name(requirement):
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
+def read_pins(path):
+    """torch/torchvision lines of a `uv export` file, markers included.
+
+    {"torch": ["torch==2.14.1 ; sys_platform == 'darwin'", ...], ...}
+    """
+    pins = {}
+    for line in path.read_text().splitlines():
+        line = line.split("#", 1)[0].strip()
+        if line and not line.startswith("-") and req_name(line) in PINNED:
+            pins.setdefault(req_name(line), []).append(line)
+    if not pins:
+        sys.exit(f"error: no {'/'.join(PINNED)} pins in {path}")
+    return pins
+
+
 def rewrite_metadata(metadata, extra, pins):
-    pins = {req_name(p): p for p in pins}
+    pins = dict(pins)
     lines = metadata.decode().splitlines()
     header_end = lines.index("") if "" in lines else len(lines)
     header, body = lines[:header_end], lines[header_end:]
@@ -60,7 +80,7 @@ def rewrite_metadata(metadata, extra, pins):
 
     requirements = []
     for req in promoted:
-        requirements.append(pins.pop(req_name(req), req))
+        requirements.extend(pins.pop(req_name(req), [req]))
     if pins:
         sys.exit(f"error: pinned packages not in extra {extra!r}: {sorted(pins)}")
 
@@ -90,7 +110,10 @@ def main():
     )
     parser.add_argument("--extra", required=True, choices=VARIANT_EXTRAS)
     parser.add_argument(
-        "--pin", action="append", default=[], help="e.g. torch==2.14.1+cu126"
+        "--pins",
+        type=Path,
+        required=True,
+        help="`uv export` output for the extra; its torch/torchvision lines are pinned",
     )
     parser.add_argument("-o", "--out-dir", type=Path, required=True)
     args = parser.parse_args()
@@ -111,7 +134,7 @@ def main():
 
     metadata_path = f"{dist_info}/METADATA"
     data, attr = files[metadata_path]
-    metadata, requirements = rewrite_metadata(data, args.extra, args.pin)
+    metadata, requirements = rewrite_metadata(data, args.extra, read_pins(args.pins))
     files[metadata_path] = (metadata, attr)
 
     record_path = f"{dist_info}/RECORD"

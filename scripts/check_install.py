@@ -11,7 +11,14 @@ Usage:
 import importlib.metadata as md
 import sys
 
-JAX_PLUGIN = {"cpu": None, "cu126": "jax-cuda12-plugin", "cu130": "jax-cuda13-plugin"}
+JAX_PLUGIN = {
+    "cpu": None,
+    "cu126": "jax-cuda12-plugin",
+    "cu130": "jax-cuda13-plugin",
+    "mps": "jax-mps",
+}
+# mps uses the CPU extension (the kernels have no Metal implementation)
+EXTENSION = {"mps": "cpu"}
 
 
 def installed(name):
@@ -44,10 +51,16 @@ def main():
         errors.append("eleanor/_version.py is missing or does not match the wheel")
     if not md.version("eleanor-ncas").endswith(f"+{variant}"):
         errors.append(f"eleanor-ncas is not the +{variant} build")
-    if not torch.__version__.endswith(f"+{variant}"):
-        errors.append(f"torch {torch.__version__} is not the +{variant} build")
-    if models._C.__name__.rsplit(".", 1)[-1] != f"_C_{variant}":
-        errors.append(f"loaded {models._C.__name__} instead of _C_{variant}")
+    # torch's macOS builds have no local version (2.14.1, not 2.14.1+cpu)
+    torch_local = "" if sys.platform == "darwin" else variant
+    if torch.__version__.partition("+")[2] != torch_local:
+        errors.append(
+            f"torch {torch.__version__} is not the "
+            f"{'+' + torch_local if torch_local else 'plain'} build"
+        )
+    extension = f"_C_{EXTENSION.get(variant, variant)}"
+    if models._C.__name__.rsplit(".", 1)[-1] != extension:
+        errors.append(f"loaded {models._C.__name__} instead of {extension}")
     for plugin, version in plugins.items():
         if plugin == JAX_PLUGIN[variant] and version is None:
             errors.append(f"{plugin} is missing")

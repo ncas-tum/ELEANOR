@@ -19,7 +19,8 @@ of them.
 Prebuilt wheels
 ---------------
 
-Prebuilt wheels are available for Linux (x86_64). Each variant has its own
+Prebuilt wheels are available for Linux (x86_64) and macOS (Apple Silicon,
+macOS 14 or newer). Each variant has its own
 package index; add it next to PyPI, and pip or uv installs ELEANOR with the
 matching PyTorch and JAX:
 
@@ -30,14 +31,17 @@ matching PyTorch and JAX:
      - Hardware
      - Index
    * - ``cpu``
-     - CPU only
+     - CPU only (Linux and macOS)
      - ``https://ncas-tum.github.io/ELEANOR/whl/cpu``
    * - ``cu126``
-     - NVIDIA GPU, CUDA 12.6
+     - NVIDIA GPU, CUDA 12.6 (Linux)
      - ``https://ncas-tum.github.io/ELEANOR/whl/cu126``
    * - ``cu130``
-     - NVIDIA GPU, CUDA 13.0
+     - NVIDIA GPU, CUDA 13.0 (Linux)
      - ``https://ncas-tum.github.io/ELEANOR/whl/cu130``
+   * - ``mps``
+     - Apple Silicon, with JAX on Metal
+     - ``https://ncas-tum.github.io/ELEANOR/whl/mps``
 
 With pip:
 

@@ -9,7 +9,10 @@
 The variant comes from each wheel's local version (0.1.0+cu126 -> cu126). The
 eleanor-ncas wheels pin exact torch/torchvision builds (e.g. torch==2.14.1+cu126),
 which only exist on PyTorch's index, so the torch pages link to exactly those
-files. Everything else (jax, numpy, the NVIDIA libraries, ...) comes from PyPI:
+files (the cpu variant pins torch==2.14.1+cpu on Linux and torch==2.14.1 on
+macOS, both on PyTorch's cpu index). The mps variant has no PyTorch index: its
+plain torch==2.14.1 comes from PyPI and gets no page. Everything else (jax,
+numpy, the NVIDIA libraries, ...) comes from PyPI:
 
     pip install eleanor-ncas --extra-index-url https://<pages>/whl/cu126
     uv add eleanor-ncas --index https://<pages>/whl/cu126
@@ -33,6 +36,8 @@ from pathlib import Path
 PROJECT = "eleanor-ncas"
 PYTORCH_INDEX = "https://download.pytorch.org/whl"
 PINNED = ("torch", "torchvision")
+# Variants whose torch builds are on PyPI rather than download.pytorch.org
+NO_PYTORCH_INDEX = ("mps",)
 ANCHOR = re.compile(r"<a\s+([^>]*?)href=\"([^\"]+)\"([^>]*)>([^<]+)</a>")
 
 
@@ -43,15 +48,15 @@ def wheel_metadata(path):
 
 
 def pinned_versions(metadata):
-    """{"torch": "2.14.1+cu126", ...} from the wheel's Requires-Dist pins."""
-    pins = {}
+    """{"torch": {"2.14.1+cpu", "2.14.1"}, ...} from the wheel's Requires-Dist pins."""
+    pins = defaultdict(set)
     for m in re.finditer(
-        r"^Requires-Dist:\s*([A-Za-z0-9._-]+)\s*==\s*([^\s;]+)\s*$",
+        r"^Requires-Dist:\s*([A-Za-z0-9._-]+)\s*==\s*([^\s;]+)\s*(;.*)?$",
         metadata,
         re.MULTILINE,
     ):
         if m.group(1).lower() in PINNED:
-            pins[m.group(1).lower()] = m.group(2)
+            pins[m.group(1).lower()].add(m.group(2))
     return pins
 
 
@@ -108,8 +113,9 @@ def main():
         links, pins = [], defaultdict(set)
         for wheel in sorted(wheels):
             metadata = wheel_metadata(wheel)
-            for project, version in pinned_versions(metadata).items():
-                pins[project].add(version)
+            if variant not in NO_PYTORCH_INDEX:
+                for project, versions in pinned_versions(metadata).items():
+                    pins[project] |= versions
             shutil.copy2(wheel, project_dir / wheel.name)
             sha = hashlib.sha256(wheel.read_bytes()).hexdigest()
             requires = re.search(r"^Requires-Python:\s*(.+)$", metadata, re.MULTILINE)
