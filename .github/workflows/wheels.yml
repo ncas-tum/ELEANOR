@@ -142,11 +142,14 @@ jobs:
       - name: uv add eleanor-ncas --index ...
         env:
           UV_HTTP_TIMEOUT: "300"   # pypi.nvidia.com can be slow
+        # A user's own project: outside this checkout, or uv would make it a
+        # member of the ELEANOR workspace and resolve eleanor-ncas to the source
         run: |
-          uv init -q --bare --python ${{ matrix.python }} uv-project
-          cd uv-project
+          PROJECT="$RUNNER_TEMP/uv-project"
+          uv init -q --bare --no-workspace --python ${{ matrix.python }} "$PROJECT"
+          cd "$PROJECT"
           uv add -q eleanor-ncas --index http://localhost:8000/${{ matrix.variant }}
-          uv run python ../scripts/check_install.py ${{ matrix.variant }}
+          uv run python "$GITHUB_WORKSPACE/scripts/check_install.py" ${{ matrix.variant }}
 
   release:
     name: Publish GitHub release
