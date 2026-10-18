@@ -1,30 +1,24 @@
 {
-	"name": "Python 3",
-	// "image": "ferqui/devenv",
-	"build": {
-		"dockerfile": "Dockerfile"
-	},
-	"hostRequirements": {
-		"gpu": "optional"
-	},
-	"runArgs": [
-		"--gpus=all",
-		"--privileged",
-		"--shm-size=12gb"
-	],
-	"customizations": {
-		// Configure properties specific to VS Code.
-		"vscode": {
-			"extensions": [
-				"ms-python.python",
-				"ms-python.flake8",
-				"ms-toolsai.jupyter",
-				"ms-python.vscode-pylance",
-				"ms-python.debugpy",
-				"ms-python.isort",
-				"ms-vscode.cpptools-extension-pack"
-			]
-		}
-	},
-	"postCreateCommand": "bash install.sh"
+  "name": "eleanor (cpu)",
+  "build": {
+    "dockerfile": "../Dockerfile.dev",
+    "context": "..",
+    "args": { 
+		"UV_EXTRA": "cpu",
+		"BASE_IMAGE": "rockylinux:8"
+	}
+  },
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+  "workspaceFolder": "/workspace",
+  "mounts": [
+    "source=eleanor-venv-cpu,target=/opt/venv,type=volume",
+    "source=uv-cache,target=/root/.cache/uv,type=volume"
+  ],
+  "postCreateCommand": "dev-sync",
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-python.python", "ms-vscode.cmake-tools", "nvidia.nsight-vscode-edition"],
+      "settings": { "python.defaultInterpreterPath": "/opt/venv/bin/python" }
+    }
+  }
 }

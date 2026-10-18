@@ -1,0 +1,39 @@
+# Version control: the version comes from the build arg, not from .git
+.git
+.github
+
+# Docker / dev container files (not needed inside the image)
+Dockerfile*
+.dockerignore
+.devcontainer
+
+# Virtual environments (host venvs are built for a different OS)
+.venv
+venv
+
+# Build outputs and artifacts
+build
+dist
+dist_raw
+**/*.egg-info
+**/*.so
+eleanor/_version.py
+
+# Python caches
+**/__pycache__
+**/*.pyc
+
+# Test and tooling caches
+.pytest_cache
+.hypothesis
+.ruff_cache
+.mypy_cache
+**/.ipynb_checkpoints
+
+# Documentation build output
+docs/_build
+
+# Editor and OS clutter
+.vscode
+.idea
+**/.DS_Store

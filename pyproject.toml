@@ -4,7 +4,7 @@ dynamic = ["version"]
 description = "Python package to simulate FeLIF neurons"
 readme = {file = "README.md", content-type = "text/markdown"}
 license = {file = "LICENSE.txt"}
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.15"
 authors = [
   { name = "Fernando M. Quintana Velázquez", email = "fernando.quintana@tum.de" },
   { name = "Luca Fehlings", email = "luca.fehlings@tum.de" },
@@ -23,20 +23,19 @@ classifiers = [
   "Topic :: Scientific/Engineering",
   "Topic :: Scientific/Engineering :: Mathematics",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Operating System :: OS Independent",
 ]
 
 dependencies = [
-  "boilerplot@git+https://github.com/fehlings/boilerplot.git",
-  "torch>=2.12.0",
-  "torchvision>=0.27.0",
-  "jax>=0.10.0",
   "snntorch>=1.0.0",
   "tonic>=1.7.0",
   "equinox>=0.13.8",
-  "ipykernel>=7.4.0",
-  "ipywidgets>=8.1.9",
 ]
 
 [project.urls]
@@ -45,9 +44,28 @@ Repository = "https://github.com/ncas-tum/ELEANOR"
 Issues = "https://github.com/ncas-tum/ELEANOR/issues"
 
 [project.optional-dependencies]
-mps = ["jax-mps>=0.10.0"]
-cuda12 = ["jax[cuda12]"]
-cuda13 = ["jax[cuda13]"]
+cpu = [
+  "torch>=2.12.0",
+  "torchvision>=0.27.0",
+  "jax>=0.10.0",
+]
+cuda12 = [
+  "torch>=2.12.0",
+  "torchvision>=0.27.0",
+  "jax[cuda12]>=0.10.0",
+]
+cuda13 = [
+  "torch>=2.12.0",
+  "torchvision>=0.27.0",
+  "jax[cuda13]>=0.10.0",
+]
+mps = [
+  "torch>=2.12.0",
+  "torchvision>=0.27.0",
+  "jax>=0.10.0",
+  "jax-mps>=0.10.0",
+]
+notebook = ["ipykernel>=7.4.0", "ipywidgets>=8.1.9", "boilerplot@git+https://github.com/fehlings/boilerplot.git"]
 
 [dependency-groups]
 dev = [
@@ -64,18 +82,48 @@ dev = [
     "sphinxcontrib-bibtex>=2.6.5",
 ]
 
+[tool.uv]
+conflicts = [
+  [
+    { extra = "cpu" },
+    { extra = "cuda12" },
+    { extra = "cuda13" },
+    { extra = "mps" },
+  ],
+]
+
 [tool.uv.sources]
 torch = [
-  { index = "pytorch-cpu"},
+  { index = "pytorch-cpu",   extra = "cpu", marker = "sys_platform != 'darwin'" },
+  { index = "pytorch-cu126", extra = "cuda12" },
+  { index = "pytorch-cu130", extra = "cuda13" },
+]
+torchvision = [
+  { index = "pytorch-cpu",   extra = "cpu", marker = "sys_platform != 'darwin'" },
+  { index = "pytorch-cu126", extra = "cuda12" },
+  { index = "pytorch-cu130", extra = "cuda13" },
 ]
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
 
 [tool.scikit-build]
 # This ensures the compiled .so file is placed in the correct package folder
 wheel.expand-macos-universal-tags = true
+cmake.version = "CMakeLists.txt"
+build-dir = "build/{wheel_tag}"
 
 [build-system]
 requires = ["scikit-build-core", "setuptools-scm", "torch"]

@@ -1,40 +1,46 @@
-cmake_minimum_required(VERSION 3.18)
+cmake_minimum_required(VERSION 3.28.3)
 project(eleanor LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+include(CheckLanguage)
+check_language(CUDA)
+
+if(CMAKE_CUDA_COMPILER)
+    set(_eleanor_cuda_default ON)
+else()
+    set(_eleanor_cuda_default OFF)
+endif()
+option(ELEANOR_WITH_CUDA "Build the CUDA kernels" ${_eleanor_cuda_default})
+
+
+if(ELEANOR_WITH_CUDA)
+    if(NOT CMAKE_CUDA_COMPILER)
+        message(FATAL_ERROR "ELEANOR_WITH_CUDA=ON but no CUDA compiler was found")
+    endif()
+
+    set(CMAKE_CUDA_STANDARD 20)
+    set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+    set(CMAKE_CUDA_EXTENSIONS OFF)
+    enable_language(CUDA)
+
+    # cu126 / cu130 from the nvcc version (major.minor only, e.g. 12.6.3 -> cu126)
+    string(REGEX MATCH "^([0-9]+)\\.([0-9]+)" _ "${CMAKE_CUDA_COMPILER_VERSION}")
+    set(CUDA_SUFFIX "cu${CMAKE_MATCH_1}${CMAKE_MATCH_2}")
+
+    message(STATUS "CUDA compiler: ${CMAKE_CUDA_COMPILER} (${CMAKE_CUDA_COMPILER_VERSION})")
+    message(STATUS "CUDA host compiler: ${CMAKE_CUDA_HOST_COMPILER}")
+    message(STATUS "CUDA enabled. Suffix: ${CUDA_SUFFIX}")
+else()
+    set(CUDA_SUFFIX "cpu")
+    message(STATUS "Building for CPU. Suffix: cpu")
+endif()
 
 find_package(Torch REQUIRED)
 find_package(Python COMPONENTS Interpreter Development REQUIRED)
-
-set(CUDA_SUFFIX "cpu")
-
-# Priority 1: Environment variable CUDA_VERSION
-if(DEFINED ENV{CUDA_VERSION})
-    set(ENV_CUDA_VER $ENV{CUDA_VERSION})
-    if(NOT ENV_CUDA_VER STREQUAL "cpu")
-        string(REPLACE "." "" CLEAN_VER ${ENV_CUDA_VER})
-        set(CUDA_SUFFIX "cu${CLEAN_VER}")
-    endif()
-# Priority 2: Check if CUDA is available via Torch (simplified check)
-# Note: We check for the existence of the CUDA compiler if not explicitly 'cpu'
-else()
-    # We attempt to find nvcc only if we aren't forced to CPU
-    find_program(NVCC_PATH nvcc)
-    if(NVCC_PATH)
-        # In a real scenario, we'd extract the version from nvcc --version
-        # For now, we'll use a placeholder or let the user set CUDA_VERSION
-        # To mirror setup.py, we can use the environment or a default
-        set(CUDA_SUFFIX "cu126") # Or implement a version check here
-    endif()
-endif()
-
-# IMPORTANT: Only enable the CUDA language if we aren't building for CPU
-if(NOT CUDA_SUFFIX STREQUAL "cpu")
-    enable_language(CUDA)
-    message(STATUS "CUDA enabled. Suffix: ${CUDA_SUFFIX}")
-else()
-    message(STATUS "Building for CPU. Suffix: cpu")
-endif()
+find_package(OpenMP REQUIRED)
 
 set(MODULE_NAME "_C_${CUDA_SUFFIX}")
 
@@ -71,13 +77,16 @@ set_target_properties(${MODULE_NAME} PROPERTIES
     OUTPUT_NAME ${MODULE_NAME}
 )
 
-# -----------------------------------------------------------------------------
-# 5. Compiler Flags & Options
-# -----------------------------------------------------------------------------
+if(ELEANOR_WITH_CUDA)
+    # Architectures come from TORCH_CUDA_ARCH_LIST via find_package(Torch);
+    # turn off CMake's own arch flags so there is a single source of truth
+    set_target_properties(${MODULE_NAME} PROPERTIES CUDA_ARCHITECTURES OFF)
+endif()
+
 # Handle Debug vs Release
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CXX_OPT "-Og")
-    set(NVCC_OPT "-Og")
+    # set(NVCC_OPT "-Og")
     set(LINK_OPT "-Og")
 else()
     set(CXX_OPT "-O3")
@@ -95,20 +104,12 @@ target_compile_options(${MODULE_NAME} PRIVATE
 # Note: No quotes here, because the C++ code uses it for token concatenation
 target_compile_definitions(${MODULE_NAME} PRIVATE TORCH_EXTENSION_NAME=${MODULE_NAME})
 
-# CUDA Architecture (Optional but recommended: adjust to your target GPUs)
-set_target_properties(${MODULE_NAME} PROPERTIES CUDA_ARCHITECTURES "75;80;86;89;90")
-
-# Linker Flags
 target_link_options(${MODULE_NAME} PRIVATE ${LINK_OPT})
 
 # Link PyTorch and OpenMP
-target_link_libraries(${MODULE_NAME} PRIVATE ${TORCH_LIBRARIES})
-find_package(OpenMP REQUIRED)
-target_link_libraries(${MODULE_NAME} PRIVATE OpenMP::OpenMP_CXX)
+target_link_libraries(${MODULE_NAME} PRIVATE
+    ${TORCH_LIBRARIES}
+    OpenMP::OpenMP_CXX
+)
 
-# -----------------------------------------------------------------------------
-# 6. Installation (for scikit-build-core)
-# -----------------------------------------------------------------------------
-# This tells scikit-build-core where to put the resulting .so file 
-# so that it ends up inside the python package.
 install(TARGETS ${MODULE_NAME} DESTINATION eleanor/torch/models)
